@@ -22,8 +22,8 @@ Restart=on-failure
 RestartSec=10
 TimeoutStopSec=45
 KillSignal=SIGTERM
-Environment=PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin
-Environment=LD_LIBRARY_PATH=/opt/cuda/lib64
+Environment=PATH={cuda_root}/bin:/usr/local/sbin:/usr/local/bin:/usr/bin
+Environment=LD_LIBRARY_PATH={cuda_root}/lib64
 
 [Install]
 WantedBy=default.target
@@ -36,8 +36,9 @@ exec "${{HOME}}/.local/bin/{manager_name}" run-server "$@"
 """
 
 
-def render_unit(launcher_name: str = "llamacpp-start") -> str:
-    return SERVICE_UNIT_TEMPLATE.format(launcher_name=launcher_name)
+def render_unit(launcher_name: str = "llamacpp-start",
+                cuda_root: str = "/usr/local/cuda") -> str:
+    return SERVICE_UNIT_TEMPLATE.format(launcher_name=launcher_name, cuda_root=cuda_root)
 
 
 def render_launcher(manager_name: str = "llamacpp") -> str:

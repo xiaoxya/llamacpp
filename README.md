@@ -1,11 +1,11 @@
-# llamacpp
+llamacpp
+========
 
-Arch Linux 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署/管理器。
+Arch Linux / Debian / Ubuntu 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署与管理器。
 
 针对 Intel i7-11700 / 64GB RAM / RTX 4070 SUPER + RTX 3060 调优，提供从
 依赖安装、CUDA 编译、systemd user service 到日常运维（配置、模型选择、
-监控、benchmark）的完整闭环。当前包含 **Bash 与 Python 双实现**，共享同一份
-`~/.config/llamacpp/*.env` 配置（已由测试验证双向兼容）。
+监控、benchmark）的完整闭环。当前包含 **Bash 与 Python 双实现**：
 
 ## 功能特性
 
@@ -31,6 +31,18 @@ Arch Linux 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署/管理器。
 - **Web 管理面板**：FastAPI + HTMX 无构建链；仪表盘（GPU、吞吐曲线、
   服务控制）、模型切换、配置编辑、Profile 切换、告警历史；
   可选 `PANEL_KEY` 登录认证
+
+## 发行版支持
+
+| 功能 | Arch 系 | Debian/Ubuntu 系 |
+| --- | --- | --- |
+| 运行时管理（启停/配置/模型/面板/监控/bench） | ✅ | ✅ |
+| 依赖安装 + CUDA 编译（`install`/`update`） | ✅ `pacman` | ✅ `apt`（CUDA Toolkit 需 NVIDIA 官方 repo 或 `nvidia-cuda-toolkit`） |
+| 驱动管理（`driver`） | ✅ nvidia-open(-dkms) + mkinitcpio | ✅ Ubuntu: `ubuntu-drivers autoinstall`；Debian: non-free 仓库后指定包名如 `nvidia-driver-550` |
+| Bash 版 `llamacpp.sh` | ✅ | ❌ 仅 Arch |
+
+CUDA 路径自动探测（`CUDA_HOME` → `/usr/local/cuda` → `/opt/cuda` → PATH），
+自定义安装只需 `export CUDA_HOME=...`。Python 版子命令在两种家族完全一致。
 
 ## 快速开始（Bash 版）
 

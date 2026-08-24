@@ -59,8 +59,16 @@ def test_render_unit_matches_bash_layout():
     unit = render_unit()
     assert "[Unit]" in unit
     assert "ExecStart=%h/.local/bin/llamacpp-start" in unit
-    assert "Environment=PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin" in unit
     assert "WantedBy=default.target" in unit
+
+def test_render_unit_cuda_root_parameterized():
+    from llamacpp.service import render_unit as r
+
+    # Arch 惯例路径与 Ubuntu 官方 repo 路径都应可用
+    for cuda in ("/opt/cuda", "/usr/local/cuda"):
+        unit = r(cuda_root=cuda)
+        assert f"Environment=PATH={cuda}/bin:" in unit
+        assert f"Environment=LD_LIBRARY_PATH={cuda}/lib64" in unit
 
 
 class TestCliSmoke:

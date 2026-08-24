@@ -34,9 +34,10 @@ from .config import (
     save_server_config,
 )
 from .gpu import detect_gpus, gpu_models_are_mixed, list_gpus, low_memory_count, nvidia_smi_available
+from .distro import current_distro, find_cuda_root
 from .installer import (
     CommandError,
-    assert_arch_linux,
+    assert_supported_linux,
     build_llama_cpp,
     die,
     git_short_commit,
@@ -121,9 +122,11 @@ def install(
     enable_linger: bool = typer.Option(False, "--enable-linger", help="退出登录后继续运行（需 sudo）"),
 ) -> None:
     """安装构建依赖、编译 llama.cpp 并生成 systemd user service。"""
-    if driver not in ("none", "nvidia-open", "nvidia-open-dkms"):
+    family, _distro = assert_supported_linux()
+    if driver == "auto":
+        driver = "none" if family == "debian" else "nvidia-open-dkms"
+    elif family == "arch" and driver not in ("none", "nvidia-open", "nvidia-open-dkms"):
         die("driver 选项无效。")
-    assert_arch_linux()
     install_build_dependencies(non_interactive=STATE.non_interactive, dry_run=STATE.dry_run)
     if driver != "none":
         manage_driver(driver, non_interactive=STATE.non_interactive, dry_run=STATE.dry_run)
@@ -192,6 +195,26 @@ def __package_service_name() -> str:
     return SERVICE_NAME
 
 
+_CUDA_ROOT_CACHE: Path | None = None
+_CUDA_RESOLVED = False
+
+
+def _cuda_root() -> Path:
+    """探测 CUDA 根目录；找不到时 die 并给出各发行版安装指引。"""
+    global _CUDA_ROOT_CACHE, _CUDA_RESOLVED
+    if not _CUDA_RESOLVED:
+        _CUDA_ROOT_CACHE = find_cuda_root() or Path("/opt/cuda")
+        _CUDA_RESOLVED = True
+    if not (_CUDA_ROOT_CACHE / "bin" / "nvcc").is_file():
+        die(
+            "未找到 CUDA Toolkit（nvcc）。请先安装：\n"
+            "  Ubuntu: sudo apt install nvidia-cuda-toolkit 或 NVIDIA 官方 repo\n"
+            "  Arch:   sudo pacman -S cuda\n"
+            "  自定义路径: export CUDA_HOME=/path/to/cuda"
+        )
+    return _CUDA_ROOT_CACHE
+
+
 def _current_manager_path() -> str:
     candidate = Path(sys.argv[0]).resolve()
     return str(candidate)
@@ -232,7 +255,11 @@ def _write_launcher_and_unit(dry_run: bool = False) -> None:
         f'exec "{manager_path}" run-server "$@"\n'
     )
     atomic_write(launcher_path, launcher_text, mode=0o755)
-    atomic_write(service_path, render_unit(launcher_name=launcher_path.name), mode=0o644)
+    atomic_write(
+        service_path,
+        render_unit(launcher_name=launcher_path.name, cuda_root=str(_cuda_root())),
+        mode=0o644,
+    )
     svc.daemon_reload()
     svc.enable(service_path.name)
 
@@ -563,10 +590,11 @@ def doctor() -> None:
         print(f"[INFO] {msg}")
 
     print(f"=== llamacpp doctor（Python v{__version__}） ===")
-    if Path("/etc/arch-release").exists():
-        ok("Arch Linux")
+    distro = current_distro()
+    if distro is not None:
+        ok(f"{distro.pretty_name}（{distro.family} 系，受支持）")
     else:
-        fail("不是 Arch Linux")
+        soft_warn("未识别的发行版——安装/驱动功能可能不可用，运行时管理不受影响")
 
     cpu_model = ""
     cpuinfo = Path("/proc/cpuinfo")
@@ -611,12 +639,16 @@ def doctor() -> None:
     from .installer import installed_driver_package
 
     note(f"驱动包: {installed_driver_package() or '未安装'}")
-    if Path("/opt/cuda/bin/nvcc").is_file():
-        result = subprocess.run(["/opt/cuda/bin/nvcc", "--version"], capture_output=True, text=True)
+    cuda_root = find_cuda_root()
+    if cuda_root is not None:
+        result = subprocess.run(
+            [str(cuda_root / "bin" / "nvcc"), "--version"],
+            capture_output=True, text=True,
+        )
         last_line = (result.stdout or "").strip().splitlines()[-1:] or ["未知版本"]
-        ok(last_line[0])
+        ok(f"CUDA Toolkit: {last_line[0]}（{cuda_root}）")
     else:
-        fail("CUDA Toolkit/nvcc 未安装")
+        fail("CUDA Toolkit/nvcc 未找到（PATH/CUDA_HOME/常见路径均无）")
     if Path("/usr/bin/cmake").exists() or any(Path(p).exists() for p in ["/usr/bin/cmake"]):
         ok("cmake 可用")
     else:
@@ -690,9 +722,10 @@ def bench() -> None:
     _check_gpu_or_die()
     argv = build_bench_command(cfg, bench_bin)
     env = dict(os.environ)
+    cuda = _cuda_root()
     env["CUDA_VISIBLE_DEVICES"] = cfg.CUDA_VISIBLE_DEVICES
-    env["PATH"] = f"/opt/cuda/bin:{env.get('PATH', '')}"
-    env["LD_LIBRARY_PATH"] = f"/opt/cuda/lib64:{env.get('LD_LIBRARY_PATH', '')}"
+    env["PATH"] = f"{cuda}/bin:{env.get('PATH', '')}"
+    env["LD_LIBRARY_PATH"] = f"{cuda}/lib64:{env.get('LD_LIBRARY_PATH', '')}"
     print("[BENCH COMMAND]", end=" ")
     for arg in argv:
         print(shlex.quote(arg), end=" ")
@@ -703,10 +736,10 @@ def bench() -> None:
 
 @app.command()
 def driver(
-    dtype: str = typer.Option("nvidia-open-dkms", "--type", help="nvidia-open 或 nvidia-open-dkms"),
-    repair: bool = typer.Option(False, "--repair", help="强制重装驱动包"),
+    dtype: str = typer.Option("auto", "--type", help="Arch: nvidia-open/nvidia-open-dkms；Debian/Ubuntu: auto 或 apt 包名如 nvidia-driver-550"),
+    repair: bool = typer.Option(False, "--repair", help="强制重装驱动包（仅 Arch）"),
 ) -> None:
-    """可选安装/修复 NVIDIA open 驱动。"""
+    """可选安装/修复 NVIDIA 驱动（按发行版自动选择方式）。"""
     manage_driver(dtype, repair=repair,
                   non_interactive=STATE.non_interactive, dry_run=STATE.dry_run)
 
@@ -924,9 +957,10 @@ def run_server() -> None:
         warn(f"服务监听 {cfg.HOST} 但未配置 API_KEY；局域网内任何设备都可访问。")
     argv = build_server_command(cfg, server_bin)
     env = dict(os.environ)
+    cuda = _cuda_root()
     env["CUDA_VISIBLE_DEVICES"] = cfg.CUDA_VISIBLE_DEVICES
-    env["PATH"] = f"/opt/cuda/bin:{env.get('PATH', '')}"
-    env["LD_LIBRARY_PATH"] = f"/opt/cuda/lib64:{env.get('LD_LIBRARY_PATH', '')}"
+    env["PATH"] = f"{cuda}/bin:{env.get('PATH', '')}"
+    env["LD_LIBRARY_PATH"] = f"{cuda}/lib64:{env.get('LD_LIBRARY_PATH', '')}"
     info(f"启动 llama-server：model={cfg.MODEL}, ctx={cfg.CTX_SIZE}, "
          f"split={cfg.SPLIT_MODE}/{cfg.TENSOR_SPLIT}")
     print("[COMMAND]", end=" ")
