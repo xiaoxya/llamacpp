@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}登录 · llamacpp 面板{% endblock %}
+{% block content %}
+<div class="card" style="max-width:380px;margin:80px auto">
+  <h2>面板登录</h2>
+  {% if error %}<p style="color:var(--bad)">{{ error }}</p>{% endif %}
+  <form method="post" action="/login">
+    <label class="cfg"><span>访问密钥</span>
+      <input type="password" name="key" autofocus></label>
+    <p><button>登录</button></p>
+  </form>
+</div>
+{% endblock %}

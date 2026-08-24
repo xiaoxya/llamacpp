@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}模型 · llamacpp 面板{% endblock %}
+{% block content %}
+<h2>模型管理</h2>
+<div class="card">
+  <p class="muted" style="margin-top:0">当前：<code>{{ current or "(未选择)" }}</code></p>
+  {% if models %}
+  <table>
+    <tr><th>文件</th><th>大小</th><th></th></tr>
+    {% for m in models %}
+    <tr>
+      <td><code>{{ m.path }}</code></td>
+      <td>{{ m.size }}</td>
+      <td>
+        {% if m.path == current %}
+          <span class="pill ok">使用中</span>
+        {% else %}
+        <form method="post" action="/models/select">
+          <input type="hidden" name="path" value="{{ m.path }}">
+          <button>切换</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">模型目录下没有 GGUF 文件。</p>{% endif %}
+  <p class="muted">切换后需重启服务生效。</p>
+</div>
+{% endblock %}

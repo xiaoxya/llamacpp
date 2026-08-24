@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 · llamacpp 面板{% endblock %}
+{% block content %}
+<h2>仪表盘</h2>
+
+<div class="card">
+  <div class="row">
+    <strong>服务 {{ service_name }}</strong>
+    {% if service_active %}<span class="pill ok">运行中</span>
+    {% else %}<span class="pill bad">已停止</span>{% endif %}
+    <form method="post" action="/service/start" hx-post="/service/start"><button>启动</button></form>
+    <form method="post" action="/service/restart" hx-post="/service/restart"><button class="warn">重启</button></form>
+    <form method="post" action="/service/stop" hx-post="/service/stop"><button class="danger">停止</button></form>
+  </div>
+  <p class="muted" style="margin-bottom:0">当前模型：<code>{{ model }}</code>
+     {% if active_profile %}· Profile：<code>{{ active_profile }}</code>{% endif %}</p>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <strong>生成吞吐</strong>
+    <span class="muted">{% if tps_now %}当前 {{ "%.1f"|format(tps_now) }} tok/s{% else %}暂无数据{% endif %}</span>
+  </div>
+  {{ spark }}
+  <p class="muted" style="margin-bottom:0">数据来源：监控采样器（<code>llamacpp-py monitor run</code>）写入的 SQLite。</p>
+</div>
+
+<div class="card">
+  <strong>GPU</strong>
+  {% if gpus %}
+  <table>
+    <tr><th>#</th><th>型号</th><th>显存总量</th><th>可用</th><th>温度</th><th>驱动</th></tr>
+    {% for g in gpus %}
+    <tr><td>{{ g.index }}</td><td>{{ g.name }}</td><td>{{ g.memory_total_mib }} MiB</td>
+        <td>{{ g.memory_free_mib }} MiB</td><td>{{ g.temperature or "-" }}℃</td><td>{{ g.driver_version }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">nvidia-smi 不可用。</p>{% endif %}
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <strong>最近告警</strong><a class="btn" href="/alerts">查看全部</a>
+  </div>
+  {% if alerts %}
+  <table>
+    <tr><th>时间</th><th>规则</th><th>消息</th><th>Webhook</th></tr>
+    {% for ts, rule, level, message, delivered in alerts %}
+    <tr><td class="muted">{{ ts | int }}</td><td><code>{{ rule }}</code></td>
+        <td>{{ message }}</td><td>{{ "已发送" if delivered else "仅记录" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">暂无告警记录。</p>{% endif %}
+</div>
+{% endblock %}

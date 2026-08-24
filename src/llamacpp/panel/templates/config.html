@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}配置 · llamacpp 面板{% endblock %}
+{% block content %}
+<h2>启动配置</h2>
+{% if saved %}<div class="card"><span class="pill ok">已保存，重启服务后生效</span></div>{% endif %}
+{% if error %}<div class="card"><span class="pill bad">{{ error }}</span></div>{% endif %}
+
+<form method="post" action="/config">
+<div class="card">
+  {% for f in fields %}
+  <label class="cfg">
+    <span>{{ f.key }}</span>
+    {% if f.key == "API_KEY" %}
+      <input type="password" name="{{ f.key }}" value=""
+             placeholder="{{ '已设置（留空保留）' if api_key_set else '未设置' }}">
+    {% else %}
+      <input type="text" name="{{ f.key }}" value="{{ f.value }}">
+    {% endif %}
+  </label>
+  {% endfor %}
+  <p><button>保存配置</button>
+     <span class="muted">保存后需重启服务：systemctl --user restart llamacpp.service</span></p>
+</div>
+</form>
+{% endblock %}

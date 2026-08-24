@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}告警 · llamacpp 面板{% endblock %}
+{% block content %}
+<h2>告警历史</h2>
+<div class="card">
+  {% if alerts %}
+  <table>
+    <tr><th>时间</th><th>规则</th><th>级别</th><th>消息</th><th>Webhook</th></tr>
+    {% for ts, rule, level, message, delivered in alerts %}
+    <tr>
+      <td class="muted">{{ ts | int }}</td>
+      <td><code>{{ rule }}</code></td>
+      <td>{{ level }}</td>
+      <td>{{ message }}</td>
+      <td>{{ "已发送" if delivered else "仅记录" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">暂无告警。配置监控参数：~/.config/llamacpp/monitor.env</p>
+  {% endif %}
+</div>
+{% endblock %}

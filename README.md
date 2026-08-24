@@ -21,6 +21,17 @@ Arch Linux 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署/管理器。
   日志跟踪、交互式菜单
 - **安全默认值**：API Key 支持、卸载永远不碰模型目录、危险路径拒绝删除
 
+### Python 版新功能（B'）
+
+- **Profile 多配置**：`profile create/use/list/delete`，一套配置快照、
+  一键切换；面板同步支持切换
+- **监控告警**：采样 nvidia-smi + `/metrics` 存 SQLite；显存/温度/
+  health 连续失败阈值告警；通知走面板内 + 日志 + Webhook
+  （generic / 企业微信 / 钉钉 / Telegram / Bark 格式适配）
+- **Web 管理面板**：FastAPI + HTMX 无构建链；仪表盘（GPU、吞吐曲线、
+  服务控制）、模型切换、配置编辑、Profile 切换、告警历史；
+  可选 `PANEL_KEY` 登录认证
+
 ## 快速开始（Bash 版）
 
 ```bash
@@ -38,6 +49,20 @@ make install-user              # 安装到 ~/.local/bin/llamacpp-py
 llamacpp-py --version
 llamacpp-py config --show      # 直接读取 Bash 版写出的配置
 llamacpp-py models             # 子命令与 Bash 版一一对应
+```
+
+### 监控与面板（Python 版）
+
+```bash
+llamacpp-py monitor config                 # 生成/查看 monitor.env（阈值与 Webhook）
+llamacpp-py monitor run                    # 启动采样循环（可注册为 systemd 服务）
+llamacpp-py monitor status                 # 最近吞吐与告警
+
+llamacpp-py panel                          # 启动面板 http://127.0.0.1:8199/
+# 局域网访问时先在 monitor.env 设置 PANEL_KEY 启用登录认证
+
+llamacpp-py profile create myprofile       # 快照当前启动配置
+llamacpp-py profile list && llamacpp-py profile use myprofile
 ```
 
 两个版本读写同一份 `~/.config/llamacpp/server.env` 与 `build.env`，
@@ -83,10 +108,10 @@ make install-user  # 安装 Python 版 CLI 到 ~/.local/bin/llamacpp-py
 ## 项目路线
 
 - **阶段 A（已完成）**：工程化整理——仓库结构、lint 门禁、单元测试、文档
-- **阶段 C（进行中）**：Python 重写完成核心模块，配置双向兼容；
-  待真机验收后切换默认
-- **阶段 B'**：Profile 多配置、SQLite 监控告警（Webhook 通知）、
-  FastAPI + HTMX Web 管理面板
+- **阶段 C（已完成核心）**：Python 重写全部子命令，配置双向兼容；
+  待真机验收后切换默认并冻结 Bash 版
+- **阶段 B'（已完成核心）**：Profile 多配置、SQLite 监控告警（Webhook）、
+  FastAPI + HTMX 面板；同样待真机验收
 
 设计详情见 [docs/specs](docs/specs/)。
 

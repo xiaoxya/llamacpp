@@ -813,6 +813,198 @@ def _wizard_entry() -> None:
     _config_wizard(cfg)
 
 
+# -------------------------------------------------------------- B' 新功能 --
+
+profile_app = typer.Typer(help="多配置 profile 管理", no_args_is_help=True)
+app.add_typer(profile_app, name="profile")
+
+monitor_app = typer.Typer(help="监控采样与告警", no_args_is_help=True)
+app.add_typer(monitor_app, name="monitor")
+
+
+def _profiles_dir() -> Path:
+    from .profiles import profiles_dir
+
+    directory = profiles_dir(paths.config_dir())
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+@profile_app.command("create")
+def profile_create(
+    name: str = typer.Argument(..., help="profile 名（字母数字 ._ -）"),
+    description: str = typer.Option("", "--desc", help="描述注释"),
+) -> None:
+    """把当前生效的 server.env 快照为新 profile。"""
+    from .profiles import ProfileError, create_profile
+
+    try:
+        target = create_profile(paths.config_dir(), name,
+                                paths.server_config_file(), description)
+    except ProfileError as exc:
+        die(str(exc))
+    info(f"已创建 profile：{target}")
+
+
+@profile_app.command("use")
+def profile_use(name: str = typer.Argument(..., help="要激活的 profile 名")) -> None:
+    """激活 profile：写入 server.env 并记录指针。"""
+    from .profiles import ProfileError, use_profile
+
+    try:
+        cfg = use_profile(paths.config_dir(), name, paths.server_config_file(),
+                          dry_run=STATE.dry_run)
+        if not STATE.dry_run:
+            errors = cfg.validate()
+            if errors:
+                die("；".join(errors))  # pragma: no cover — use_profile 内已校验
+    except ProfileError as exc:
+        die(str(exc))
+    info(f"已激活 profile：{name}；重启服务后生效。")
+
+
+@profile_app.command("list")
+def profile_list() -> None:
+    """列出所有 profile 及当前激活项。"""
+    from .profiles import active_profile, list_profiles
+
+    profiles = list_profiles(paths.config_dir())
+    active = active_profile(paths.config_dir())
+    if not profiles:
+        info("还没有 profile；用 profile create <名字> 快照当前配置。")
+        return
+    for p in profiles:
+        marker = "*" if p.stem == active else " "
+        print(f" {marker} {p.stem}")
+    if active:
+        print(f"\n当前激活：{active}")
+
+
+@profile_app.command("delete")
+def profile_delete(
+    name: str = typer.Argument(...),
+    yes: bool = typer.Option(False, "--yes", help="跳过确认"),
+) -> None:
+    """删除 profile（不影响 server.env 当前内容）。"""
+    from .profiles import ProfileError, delete_profile
+
+    if not yes and not _confirm(f"确定删除 profile {name}？"):
+        warn("已取消。")
+        return
+    try:
+        delete_profile(paths.config_dir(), name)
+    except ProfileError as exc:
+        die(str(exc))
+    info(f"已删除 profile：{name}")
+
+
+@profile_app.command("show")
+def profile_show(name: str = typer.Argument(...)) -> None:
+    """查看 profile 内容。"""
+    from .profiles import ProfileError, show_profile
+
+    try:
+        print(show_profile(paths.config_dir(), name))
+    except ProfileError as exc:
+        die(str(exc))
+
+
+def _monitor_env() -> Path:
+    return paths.config_dir() / "monitor.env"
+
+
+@monitor_app.command("run")
+def monitor_run(
+    once: bool = typer.Option(False, "--once", help="只采样一轮后退出（调试用）"),
+) -> None:
+    """启动监控采样循环（可注册为 systemd service 长期运行）。"""
+    from .monitor import load_monitor_config, run_loop
+
+    try:
+        cfg = load_monitor_config(_monitor_env())
+    except ValueError as exc:
+        die(str(exc))
+    db_path = paths.data_home() / "llamacpp" / "metrics.db"
+    run_loop(db_path, cfg, once=once or STATE.dry_run)
+
+
+@monitor_app.command("status")
+def monitor_status() -> None:
+    """查看最近吞吐与最新 GPU 样本。"""
+    from .monitor import connect, latest_tps, recent_alerts
+
+    db_path = paths.data_home() / "llamacpp" / "metrics.db"
+    if not db_path.exists():
+        info("尚无监控数据；先运行 monitor run。")
+        return
+    conn = connect(db_path)
+    points = latest_tps(conn, limit=10)
+    alerts = recent_alerts(conn, limit=10)
+    conn.close()
+    print("最近吞吐（tok/s）:")
+    for ts, tps in reversed(points):
+        print(f"  {time.strftime('%H:%M:%S', time.localtime(ts))}  {tps:8.2f}")
+    print(f"\n最近告警 {len(alerts)} 条：")
+    for ts, rule, level, message, delivered in alerts:
+        mark = "[已通知]" if delivered else "[仅记录]"
+        print(f"  {time.strftime('%m-%d %H:%M:%S', time.localtime(ts))} {mark} {rule}: {message}")
+
+
+@monitor_app.command("config")
+def monitor_config_command(
+    show: bool = typer.Option(False, "--show", help="显示当前监控配置"),
+    edit: bool = typer.Option(False, "--edit", help="用编辑器打开 monitor.env"),
+) -> None:
+    """管理监控配置 monitor.env。"""
+    from .monitor import MonitorConfig, load_monitor_config, save_monitor_config
+
+    path = _monitor_env()
+    if edit:
+        _edit_config(path)
+        return
+    try:
+        cfg = load_monitor_config(path)
+    except ValueError:
+        cfg = MonitorConfig()
+        save_monitor_config(cfg, path)
+        info(f"已生成默认配置:{path}")
+    for key in ("INTERVAL", "TEMP_MAX", "MEM_PCT_MAX", "HEALTH_FAIL_MAX",
+                "ALERT_COOLDOWN", "WEBHOOK_URL", "WEBHOOK_FORMAT",
+                "TELEGRAM_CHAT_ID", "PANEL_KEY"):
+        value = getattr(cfg, key)
+        if key == "PANEL_KEY":
+            value = "********" if value else "(未设置)"
+        print(f"{key}={value}")
+
+
+@app.command()
+def panel(
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址（默认仅本机）"),
+    port: int = typer.Option(8199, "--port", min=1, max=65535),
+) -> None:
+    """启动 Web 管理面板。认证密钥在 monitor.env 的 PANEL_KEY。"""
+    from .panel import serve
+
+    if host not in ("127.0.0.1", "localhost"):
+        cfg = load_monitor_config_safe()
+        if cfg is not None and not cfg.PANEL_KEY:
+            warn("面板监听非本机地址但未设置 PANEL_KEY，任何人都可以访问！")
+    info(f"面板地址:http://{host}:{port}/")
+    try:
+        serve(host=host, port=port)
+    except OSError as exc:
+        die(f"面板启动失败:{exc}")
+
+
+def load_monitor_config_safe():
+    try:
+        from .monitor import load_monitor_config
+
+        return load_monitor_config(_monitor_env())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"llamacpp {__version__}")
