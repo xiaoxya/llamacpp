@@ -87,17 +87,22 @@ def build_bench_command(cfg: ServerConfig, bench_bin: Path) -> list[str]:
     ]
 
 
+def normalize_host(host: str) -> str:
+    """把监听地址转换为可连接的地址（通配地址映射到回环）。"""
+    if host in ("0.0.0.0", ""):
+        return "127.0.0.1"
+    if host in ("::", "[::]"):
+        return "[::1]"
+    if host.startswith("["):
+        return host
+    if ":" in host:
+        return f"[{host}]"
+    return host
+
+
 def health_url(host: str, port: str | int) -> str:
     """把监听地址转换为可访问的 health URL（与 Bash 版映射规则一致）。"""
-    if host in ("0.0.0.0", ""):
-        health_host = "127.0.0.1"
-    elif host in ("::", "[::]"):
-        health_host = "[::1]"
-    elif ":" in host and not host.startswith("["):
-        health_host = f"[{host}]"
-    else:
-        health_host = host
-    return f"http://{health_host}:{port}/health"
+    return f"http://{normalize_host(host)}:{port}/health"
 
 
 def http_get(url: str, api_key: str | None = None, timeout: float = 10.0) -> tuple[int, bytes]:

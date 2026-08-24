@@ -136,3 +136,52 @@ class TestHealthUrl:
     def test_mapping(self, host, expected_prefix):
         port = "9000" if host == "::" else "8080"
         assert health_url(host, port) == expected_prefix
+
+
+class TestNormalizeHost:
+    from llamacpp.server import normalize_host as _nh  # noqa — 引用便于阅读
+
+    def test_wildcards_map_to_loopback(self):
+        from llamacpp.server import normalize_host
+
+        assert normalize_host("0.0.0.0") == "127.0.0.1"
+        assert normalize_host("") == "127.0.0.1"
+        assert normalize_host("::") == "[::1]"
+
+    def test_plain_and_ipv6_untouched_or_bracketed(self):
+        from llamacpp.server import normalize_host
+
+        assert normalize_host("192.168.1.5") == "192.168.1.5"
+        assert normalize_host("::1") == "[::1]"
+
+    def test_metrics_url_uses_normalized_host(self, monkeypatch):
+        """回归：HOST=0.0.0.0 时 /metrics 也必须走 127.0.0.1。"""
+        import llamacpp.monitor as mon
+
+        captured = {}
+        def fake_urlopen(req, timeout):
+            captured["url"] = req.full_url
+            class R:
+                status = 200
+                def read(self): return b"llamacpp:tokens_predicted_total 5\n"
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+            return R()
+        monkeypatch.setattr(mon.urllib.request, "urlopen", fake_urlopen)
+        result = mon.collect_server_metrics("0.0.0.0", "8080")
+        assert captured["url"] == "http://127.0.0.1:8080/metrics"
+        assert result == {"predicted_tokens": 5.0}
+
+    def test_sample_once_diag(self, tmp_path, monkeypatch):
+        """diag 回填 health/metrics 状态，供面板与 probe 展示。"""
+        import llamacpp.monitor as mon
+        from llamacpp.monitor import Alerter, MonitorConfig, connect, sample_once
+
+        monkeypatch.setattr(mon, "collect_gpu_samples", lambda: [])
+        monkeypatch.setattr(mon, "collect_server_metrics",
+                            lambda *a, **k: {"predicted_tokens": 9.0})
+        monkeypatch.setattr(mon, "check_health", lambda *a, **k: True)
+        db = connect(tmp_path / "m.db")
+        diag = {}
+        sample_once(db, MonitorConfig(), Alerter(MonitorConfig(), db), None, diag=diag)
+        assert diag == {"health": True, "metrics": True}

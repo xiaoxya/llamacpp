@@ -54,7 +54,8 @@ class SamplerHandle:
         self.lock = threading.Lock()
         self.stop = threading.Event()
         self.last_success: float | None = None   # 最近一次成功采样的时间
-        self.reachable: bool | None = None       # 推理服务 /metrics 可达性
+        self.reachable: bool | None = None       # 推理服务 health 可达性
+        self.metrics_ok: bool | None = None      # /metrics 是否有数据
         self.thread: "threading.Thread | None" = None
 
 
@@ -66,14 +67,15 @@ def _sampler_loop(db_path: Path, cfg: "MonitorConfig", handle: SamplerHandle) ->
     alerter = Alerter(cfg, conn)
     prev = None
     while not handle.stop.is_set():
+        diag: dict = {}
         try:
-            prev, _fired = sample_once(conn, cfg, alerter, prev)
-            reachable = check_health(cfg.HOST, cfg.PORT)
+            prev, _fired = sample_once(conn, cfg, alerter, prev, diag=diag)
+            reachable = bool(diag.get("health"))
         except Exception:  # noqa: BLE001 — 单轮异常不终止线程
             reachable = None
         with handle.lock:
-            if reachable is not None:
-                handle.reachable = reachable
+            handle.reachable = reachable
+            handle.metrics_ok = bool(diag.get("metrics"))
             handle.last_success = time.time()
         handle.stop.wait(max(cfg.INTERVAL, 2))
 
@@ -207,6 +209,7 @@ def create_app(
         with sampler.lock:
             last_ok = sampler.last_success
             reachable = sampler.reachable
+            metrics_ok = sampler.metrics_ok
 
         return {
             "service_active": service_active,
@@ -216,6 +219,7 @@ def create_app(
                 "running": bool(last_ok),
                 "age_seconds": round(time.time() - last_ok) if last_ok else None,
                 "reachable": reachable,
+                "metrics_ok": metrics_ok,
                 "interval": sampler_cfg.INTERVAL if start_sampler else None,
             },
             "gpus": [

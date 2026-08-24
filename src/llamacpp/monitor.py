@@ -223,7 +223,9 @@ def parse_prometheus_metrics(text: str) -> dict[str, float]:
 
 def collect_server_metrics(host: str, port: str, api_key: str = "") -> dict[str, float] | None:
     """拉取 /metrics；服务不可达时返回 None。"""
-    url = f"http://{host}:{port}/metrics"
+    from .server import normalize_host
+
+    url = f"http://{normalize_host(host)}:{port}/metrics"
     try:
         code, body = http_get(url, api_key or None, timeout=5)
     except Exception:  # noqa: BLE001 — 网络层任何失败都视为不可达
@@ -337,12 +339,19 @@ class Alerter:
 
 
 def sample_once(db: sqlite3.Connection, cfg: MonitorConfig, alerter: Alerter,
-                prev_predicted: float | None) -> tuple[float | None, list[str]]:
-    """执行一轮采集、入库与告警评估，返回 (最新 predicted_tokens, 触发的告警)。"""
+                prev_predicted: float | None, diag: dict | None = None
+                ) -> tuple[float | None, list[str]]:
+    """执行一轮采集、入库与告警评估，返回 (最新 predicted_tokens, 触发的告警)。
+
+    diag 传入 dict 时回填诊断信息：health / metrics / counters。
+    """
     ts = time.time()
     gpu_samples = collect_gpu_samples()
     metrics = collect_server_metrics(cfg.HOST, cfg.PORT, cfg.API_KEY)
     server_up = check_health(cfg.HOST, cfg.PORT)
+    if diag is not None:
+        diag["health"] = server_up
+        diag["metrics"] = bool(metrics and "predicted_tokens" in metrics)
 
     predicted = metrics.get("predicted_tokens") if metrics else None
     tps = None

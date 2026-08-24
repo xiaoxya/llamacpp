@@ -1120,6 +1120,65 @@ def monitor_status() -> None:
         print(f"  {time.strftime('%m-%d %H:%M:%S', time.localtime(ts))} {mark} {rule}: {message}")
 
 
+@monitor_app.command("probe")
+def monitor_probe() -> None:
+    """诊断采样链路：nvidia-smi → health → /metrics 原始输出与解析结果。"""
+    from .gpu import nvidia_smi_available
+    from .monitor import (
+        check_health, collect_gpu_samples, collect_server_metrics,
+        health_url, parse_prometheus_metrics,
+    )
+    import urllib.error
+    import urllib.request
+
+    cfg = load_monitor_config(_monitor_env())
+    print(f"[1] 目标: HOST={cfg.HOST} PORT={cfg.PORT}")
+
+    print("\n[2] nvidia-smi:")
+    if nvidia_smi_available():
+        samples = collect_gpu_samples()
+        for s in samples:
+            print(f"    GPU{s.index} {s.name} {s.mem_used_mib}/{s.mem_total_mib} MiB")
+        if not samples:
+            print("    [WARN] 可执行但未返回数据")
+    else:
+        print("    [FAIL] 不可用")
+
+    url = health_url(cfg.HOST, cfg.PORT)
+    print(f"\n[3] health: {url}")
+    try:
+        code, body = http_get(url, timeout=5)
+        print(f"    HTTP {code}: {body[:100]!r}")
+        ok = code == 200
+    except Exception as exc:  # noqa: BLE001
+        print(f"    [FAIL] {exc}")
+        ok = False
+    print(f"    check_health 判定: {check_health(cfg.HOST, cfg.PORT)}（期望与上面一致）")
+
+    murl = f"http://{cfg.HOST}:{cfg.PORT}/metrics"
+    print(f"\n[4] /metrics: {murl}")
+    req = urllib.request.Request(murl)
+    if cfg.API_KEY:
+        req.add_header("Authorization", f"Bearer {cfg.API_KEY}")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw = resp.read().decode(errors="replace")
+        lines = [l for l in raw.splitlines() if l.strip()][:12]
+        for line in lines:
+            print(f"    | {line}")
+        parsed = parse_prometheus_metrics(raw)
+        print(f"    解析结果: {parsed or '【空——格式不匹配！】'}")
+        if not parsed:
+            print("    [FAIL] 无法解析出 token 计数；请把上面原始输出发给开发者。")
+    except urllib.error.HTTPError as exc:
+        print(f"    [FAIL] HTTP {exc.code}（401=需要 API_KEY，404=此版本无 /metrics）")
+    except Exception as exc:  # noqa: BLE001
+        print(f"    [FAIL] {exc}")
+
+    print("\n[5] 配置回显:")
+    print(f"    API_KEY={'已设置' if cfg.API_KEY else '未设置'} INTERVAL={cfg.INTERVAL}")
+
+
 @monitor_app.command("config")
 def monitor_config_command(
     show: bool = typer.Option(False, "--show", help="显示当前监控配置"),

@@ -302,12 +302,12 @@ class TestEmbeddedSampler:
 
         calls = {"n": 0}
 
-        def fake_sample_once(db, cfg, alerter, prev):
+        def fake_sample_once(db, cfg, alerter, prev, diag=None):
             calls["n"] += 1
             db.execute(
-                "INSERT INTO samples (ts, gpu_index, name, mem_used_mib,"
-                " mem_total_mib, mem_pct, temperature, utilization,"
-                " predicted_tokens, prompt_tokens, predicted_tps)"
+                "INSERT INTO samples (ts, gpu_index, name, mem_used_mib," 
+                " mem_total_mib, mem_pct, temperature, utilization," 
+                " predicted_tokens, prompt_tokens, predicted_tps)" 
                 " VALUES (?,0,'RTX',100,200,50,60,10,?,5,?)",
                 (time_mod.time(), 100.0 + calls["n"] * 50, 5.0),
             )
@@ -340,7 +340,7 @@ class TestEmbeddedSampler:
 
         calls = {"n": 0}
 
-        def fake_sample_once(db, cfg, alerter, prev):
+        def fake_sample_once(db, cfg, alerter, prev, diag=None):
             calls["n"] += 1
             return None, []
 

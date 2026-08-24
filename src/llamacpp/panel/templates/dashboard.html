@@ -201,7 +201,10 @@ function apply(data) {
     note.textContent = '等待内置采样器启动…';
   } else if (s.reachable === false) {
     tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
-    note.textContent = '推理服务 /metrics 不可达（检查服务与 METRICS 配置）';
+    note.textContent = '推理服务未运行（health 不通）';
+  } else if (s.metrics_ok === false) {
+    tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
+    note.textContent = 'health 通但 /metrics 无数据——运行 llamacpp-py monitor probe 查看详情';
   } else {
     tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
     note.textContent = `已连接，等待首个采样（约 ${s.interval || 10}s）…`;
