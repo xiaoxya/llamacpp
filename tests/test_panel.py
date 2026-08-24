@@ -263,7 +263,7 @@ class TestApiLive:
         resp = client.get("/api/live", headers=HTMX_HEADERS)
         assert resp.status_code == 200
         data = json.loads(resp.text)
-        for key in ("service_active", "model", "gpus", "tps_now", "series", "alerts"):
+        for key in ("service_active", "model", "gpus", "sampler", "alerts"):
             assert key in data
 
     def test_auth_required_when_key_set(self, env):
@@ -280,8 +280,7 @@ class TestApiLiveData:
         resp = client.get("/api/live", headers=HTMX_HEADERS)
         assert resp.status_code == 200
         data = json.loads(resp.text)
-        for key in ("service_active", "model", "gpus", "tps_now", "series",
-                    "alerts", "sampler"):
+        for key in ("service_active", "model", "gpus", "sampler", "alerts"):
             assert key in data
         assert "reachable" in data["sampler"]
 
@@ -328,9 +327,13 @@ class TestEmbeddedSampler:
         data = client.get("/api/live", headers=HTMX_HEADERS).json()
         assert data["sampler"]["running"] is True
         assert data["sampler"]["interval"] == 2
-        assert data["tps_now"] is not None and data["tps_now"] > 0
-        assert len(data["series"]) >= 1
 
+        from llamacpp.monitor import connect as db_connect
+
+        conn = db_connect(_db)
+        n = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
+        conn.close()
+        assert n >= 1, "采样线程应已写库"
         client.app.state.sampler_stop.set()
 
     def test_sampler_stop_event_halts(self, env, monkeypatch):
@@ -351,25 +354,4 @@ class TestEmbeddedSampler:
         time_mod.sleep(0.4)
         # 停止后不再增长（可能存在一次进行中的调用）
         assert calls["n"] - n_before <= 1
-
-    def test_seeded_db_shows_tps(self, env):
-        """无采样器时读 SQLite 兜底数据。"""
-        import time as time_mod
-
-        from llamacpp.monitor import connect
-
-        _, _server_env, db_path = env
-        conn = connect(db_path)
-        now = time_mod.time()
-        conn.execute(
-            "INSERT INTO samples (ts, gpu_index, mem_used_mib, mem_total_mib,"
-            " predicted_tps) VALUES (?,0,1,2,?)", (now, 7.5),
-        )
-        conn.commit()
-        conn.close()
-        client = make_client(env)
-        data = client.get("/api/live", headers=HTMX_HEADERS).json()
-        assert data["tps_now"] == 7.5
-        assert len(data["series"]) == 1
-
 

@@ -28,8 +28,8 @@ Arch Linux / Debian / Ubuntu 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署
 - **监控告警**：采样 nvidia-smi + `/metrics` 存 SQLite；显存/温度/
   health 连续失败阈值告警；通知走面板内 + 日志 + Webhook
   （generic / 企业微信 / 钉钉 / Telegram / Bark 格式适配）
-- **Web 管理面板**：FastAPI + HTMX 无构建链；仪表盘（GPU、吞吐曲线、
-  服务控制）、模型切换、配置编辑、Profile 切换、告警历史；
+- **Web 管理面板**：FastAPI + HTMX 无构建链；仪表盘（GPU、服务控制、
+  告警历史）、模型切换、配置编辑、Profile 切换；
   可选 `PANEL_KEY` 登录认证
 
 ## 发行版支持

@@ -2,8 +2,6 @@
 {% block title %}仪表盘 · llamacpp{% endblock %}
 {% block nav_dashboard %}active{% endblock %}
 {% block head %}
-<link rel="stylesheet" href="/static/uplot.min.css">
-<script src="/static/uplot.iife.min.js"></script>
 <style>
   .gpu-card { padding: 14px 16px; }
   .gpu-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
@@ -18,7 +16,6 @@
   .t-ok{color:var(--ok)} .t-warn{color:var(--warn)} .t-bad{color:var(--bad)}
   .gpu-meta { display: flex; justify-content: space-between; margin-top: 6px;
               font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
-  #chart { width: 100%; }
 </style>
 {% endblock %}
 {% block content %}
@@ -32,6 +29,7 @@
       <span class="pill bad" id="svc-pill"><span class="dot bad"></span>检测中…</span>
       <code id="model-name">{{ model }}</code>
       {% if active_profile %}<span class="pill">profile · {{ active_profile }}</span>{% endif %}
+      <span class="pill" id="sampler-chip"><span class="dot bad"></span>采样器检测中…</span>
     </div>
     <div class="row">
       <form method="post" action="/service/start"><button hx-post="/service/start">启动</button></form>
@@ -41,13 +39,7 @@
   </div>
 </div>
 
-<div class="grid g3">
-  <div class="card">
-    <div class="stat-label">生成吞吐 tok/s</div>
-    <div class="hero-num" id="tps-now">--</div>
-    <div class="small muted" id="tps-note">连接中…</div>
-    <div class="small muted num" id="chart-peak">峰值 --</div>
-  </div>
+<div class="grid g2">
   <div class="card">
     <div class="stat-label">当前模型</div>
     <div class="num small" id="stat-model" style="word-break:break-all">{{ model }}</div>
@@ -56,14 +48,6 @@
     <div class="stat-label">激活 Profile</div>
     <div class="num">{% if active_profile %}{{ active_profile }}{% else %}<span class="muted">默认配置</span>{% endif %}</div>
   </div>
-</div>
-
-<div class="card">
-  <div class="row spread" style="margin-bottom:8px">
-    <h3 style="margin:0">生成吞吐</h3>
-    <span class="pill" id="sampler-chip"><span class="dot bad"></span>采样器检测中…</span>
-  </div>
-  <div id="chart"></div>
 </div>
 
 <div class="card">
@@ -96,9 +80,6 @@
 
 <script>
 const REFRESH_MS = 5000;
-let chart = null;
-
-function tempClass(t){ return t == null ? '' : (t >= 75 ? 't-bad' : t >= 60 ? 't-warn' : 't-ok'); }
 
 function renderGpus(gpus) {
   const box = document.getElementById('gpu-cards');
@@ -134,43 +115,8 @@ function renderAlerts(rows) {
     </tr>`).join('');
 }
 
-function initChart(series) {
-  const data = series.length ? series : [[Date.now(), 0], [Date.now(), 0]];
-  const opts = {
-    width: document.getElementById('chart').clientWidth,
-    height: 190,
-    cursor: { show: true },
-    scales: { x: { time: true } },
-    axes: [
-      { stroke: '#8291a8', grid: { stroke: 'rgba(148,163,184,.08)' }, ticks: { stroke: 'rgba(148,163,184,.15)' } },
-      { stroke: '#8291a8', grid: { stroke: 'rgba(148,163,184,.08)' }, ticks: { stroke: 'rgba(148,163,184,.15)' } },
-    ],
-    series: [
-      {},
-      {
-        label: 'tok/s', stroke: '#22d3ee', width: 2,
-        points: { show: false },
-        fill: (u, i) => createGradient(u),
-      },
-    ],
-  };
-  chart = new uPlot(opts, [data.map(p => p[0]), data.map(p => p[1])],
-                    document.getElementById('chart'));
-}
 
-function createGradient(u) {
-  const ctx = u.ctx;
-  const grad = ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.bottom);
-  grad.addColorStop(0, 'rgba(34,211,238,.28)');
-  grad.addColorStop(1, 'rgba(139,92,246,.02)');
-  return grad;
-}
 
-function updateChart(series) {
-  if (!chart) { initChart(series); return; }
-  const data = series.length ? series : [[Date.now(), 0], [Date.now(), 0]];
-  chart.setData([data.map(p => p[0]), data.map(p => p[1])]);
-}
 
 function apply(data) {
   const s = data.sampler || {};
@@ -189,33 +135,8 @@ function apply(data) {
   }
   } catch (e) { console.error('apply/状态区', e); }
 
-  try {
-  const tpsEl = document.getElementById('tps-now');
-  const note = document.getElementById('tps-note');
-  if (data.tps_now != null) {
-    tpsEl.textContent = data.tps_now.toFixed(1);
-    tpsEl.style.opacity = '';
-    note.textContent = s.interval ? `监控采样 · 每 ${s.interval}s 更新` : '监控采样';
-  } else if (!s.running) {
-    tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
-    note.textContent = '等待内置采样器启动…';
-  } else if (s.reachable === false) {
-    tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
-    note.textContent = '推理服务未运行（health 不通）';
-  } else if (s.metrics_ok === false) {
-    tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
-    note.textContent = 'health 通但 /metrics 无数据——运行 llamacpp-py monitor probe 查看详情';
-  } else {
-    tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
-    note.textContent = `已连接，等待首个采样（约 ${s.interval || 10}s）…`;
-  }
-  const peak = Math.max(0, ...data.series.map(p => p[1]));
-  document.getElementById('chart-peak').textContent =
-    data.series.length > 1 ? `峰值 ${peak.toFixed(1)} tok/s` : '峰值 --';
-  } catch (e) { console.error('apply/吞吐区', e); }
 
   try { renderGpus(data.gpus); } catch (e) { console.error('apply/GPU', e); }
-  try { updateChart(data.series); } catch (e) { console.error('apply/图表', e); }
   try { renderAlerts(data.alerts); } catch (e) { console.error('apply/告警', e); }
 
   try {
@@ -242,8 +163,7 @@ async function poll() {
 
 poll();
 setInterval(() => { if (!document.hidden) poll(); }, REFRESH_MS);
-window.addEventListener('resize', () => chart && chart.resize(
-  document.getElementById('chart').clientWidth, chart.height));</script>
+</script>
 <div id="js-error" style="display:none;margin-top:12px;color:var(--bad)"></div>
 </script>
 {% endblock %}

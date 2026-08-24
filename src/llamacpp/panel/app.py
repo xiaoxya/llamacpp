@@ -30,9 +30,7 @@ from ..config import (
 from ..models import human_size, scan_models
 from ..monitor import (
     MonitorConfig,
-    collect_server_metrics,
     connect,
-    latest_tps,
     load_monitor_config,
     recent_alerts,
 )
@@ -203,7 +201,6 @@ def create_app(
         gpus = list_gpus()
         service_active = svc.is_active(paths.service_file().name)
         conn = connect(db_path)
-        tps_points = latest_tps(conn, limit=120)
         alerts = recent_alerts(conn, limit=8)
         conn.close()
 
@@ -232,8 +229,6 @@ def create_app(
                 }
                 for g in gpus
             ],
-            "tps_now": tps_points[-1][1] if tps_points else None,
-            "series": [[int(t * 1000), round(v, 2)] for t, v in tps_points],
             "alerts": [
                 [row[0], row[1], row[3], bool(row[4])] for row in alerts
             ],
