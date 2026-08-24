@@ -68,7 +68,10 @@ class TestCliSmoke:
         env = dict(os.environ)
         env["PYTHONPATH"] = SRC
         if home is not None:
+            # 隔离所有影响路径解析的环境变量（CI runner 可能预置 XDG_*）
             env["HOME"] = str(home)
+            env["XDG_CONFIG_HOME"] = str(home / ".config")
+            env["XDG_DATA_HOME"] = str(home / ".local/share")
         return subprocess.run(
             [sys.executable, "-m", "llamacpp", *args],
             capture_output=True,
