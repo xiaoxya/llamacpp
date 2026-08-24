@@ -173,13 +173,13 @@ function updateChart(series) {
 }
 
 function apply(data) {
+  const s = data.sampler || {};
   try {
   const pill = document.getElementById('svc-pill');
   pill.className = 'pill ' + (data.service_active ? 'ok' : 'bad');
   pill.innerHTML = `<span class="dot ${data.service_active ? 'ok' : 'bad'}"></span>${data.service_active ? '运行中' : '已停止'}`;
 
   const chip = document.getElementById('sampler-chip');
-  const s = data.sampler || {};
   if (s.running) {
     chip.className = 'pill ok';
     chip.innerHTML = `<span class="dot ok"></span>采样器运行中 · ${s.age_seconds}s 前`;
