@@ -197,6 +197,19 @@ def _current_manager_path() -> str:
     return str(candidate)
 
 
+def _manager_exec() -> str:
+    """返回可在 systemd ExecStart 中使用的命令串。
+
+    通过 pip 安装的入口脚本直接引用；通过 python -m 运行时改用解释器 + -m。
+    """
+    argv0 = Path(sys.argv[0]).resolve()
+    import shlex
+
+    if argv0.name == "__main__.py":
+        return f"{shlex.quote(sys.executable)} -m llamacpp"
+    return shlex.quote(str(argv0))
+
+
 def _write_launcher_and_unit(dry_run: bool = False) -> None:
     from .service import render_launcher, render_unit
 
@@ -698,6 +711,163 @@ def driver(
                   non_interactive=STATE.non_interactive, dry_run=STATE.dry_run)
 
 
+# ------------------------------------------------------------------ 面板 --
+
+panel_app = typer.Typer(help="Web 管理面板（serve 前台 / install 后台服务）",
+                        no_args_is_help=True)
+app.add_typer(panel_app, name="panel")
+
+from .panel.app import PANEL_SERVICE_NAME  # noqa: E402
+
+PANEL_LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _panel_service_path() -> Path:
+    return paths.systemd_user_dir() / "llamacpp-panel.service"
+
+
+@panel_app.command("serve")
+def panel_serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址（默认仅本机）"),
+    port: int = typer.Option(8199, "--port", min=1, max=65535),
+) -> None:
+    """前台启动面板（调试用；长期运行请用 panel install）。"""
+    from .panel import serve
+
+    _panel_guard_lan(host)
+    info(f"面板地址:http://{host}:{port}/ （Ctrl+C 退出）")
+    try:
+        serve(host=host, port=port)
+    except OSError as exc:
+        die(f"面板启动失败:{exc}")
+
+
+def _panel_guard_lan(host: str) -> None:
+    """局域网监听时检查 PANEL_KEY，未设置则拒绝并给出指引。"""
+    if host in PANEL_LOCAL_HOSTS:
+        return
+    cfg = load_monitor_config_safe()
+    if cfg is None or not cfg.PANEL_KEY:
+        die(
+            f"面板将监听 {host}，但 monitor.env 未设置 PANEL_KEY，"
+            "局域网内任何设备都可以访问。请在 "
+            f"{paths.config_dir() / 'monitor.env'} 中加入一行：\n"
+            '  PANEL_KEY="一个长随机密钥"\n'
+            "设置后重新执行本命令；或临时加 --yes 强制跳过此检查。"
+        )
+    info("已启用 PANEL_KEY 认证。")
+
+
+@panel_app.command("install")
+def panel_install(
+    host: str = typer.Option("0.0.0.0", "--host", help="监听地址；局域网访问用 0.0.0.0"),
+    port: int = typer.Option(8199, "--port", min=1, max=65535),
+    yes: bool = typer.Option(False, "--yes", help="跳过 PANEL_KEY 安全检查"),
+    start_now: bool = typer.Option(True, "--start/--no-start", help="安装后立即启动"),
+) -> None:
+    """把面板注册为 systemd user service 并后台运行。"""
+    from .panel import render_panel_unit
+
+    if host not in PANEL_LOCAL_HOSTS:
+        cfg = load_monitor_config_safe()
+        has_key = cfg is not None and bool(cfg.PANEL_KEY)
+        if not has_key and not yes:
+            die(
+                f"监听 {host} 需要 PANEL_KEY 认证。在 "
+                f"{paths.config_dir() / 'monitor.env'} 加入：\n"
+                '  PANEL_KEY="一个长随机密钥"\n'
+                "或加 --yes 跳过检查（不推荐）。"
+            )
+        if has_key:
+            info("已启用 PANEL_KEY 认证。")
+        else:
+            warn("已按 --yes 跳过安全检查：面板无认证暴露在局域网！")
+    manager = _manager_exec()
+    unit_path = _panel_service_path()
+    unit_text = render_panel_unit(manager, host, port)
+    if STATE.dry_run:
+        print(f"[DRY-RUN] 将写入 {unit_path}:\n{unit_text}")
+        return
+    atomic_write(unit_path, unit_text, mode=0o644)
+    svc.daemon_reload()
+    svc.enable(PANEL_SERVICE_NAME)
+    info(f"面板服务已安装:{unit_path}")
+    info(f"监听 http://{host}:{port}/ ；管理命令:llamacpp-py panel start|stop|restart|status|logs")
+    if start_now:
+        panel_start()
+
+
+@panel_app.command("start")
+def panel_start() -> None:
+    """后台启动面板服务。"""
+    _panel_installed_or_die()
+    svc.start(PANEL_SERVICE_NAME, dry_run=STATE.dry_run)
+    if not STATE.dry_run:
+        time.sleep(1)
+        if svc.is_active(PANEL_SERVICE_NAME):
+            info("面板已在后台运行。")
+        else:
+            print(svc.status_text(PANEL_SERVICE_NAME))
+            die("面板启动失败；运行 llamacpp-py panel logs 查看。")
+
+
+@panel_app.command("stop")
+def panel_stop() -> None:
+    """停止面板服务。"""
+    _panel_installed_or_die()
+    svc.stop(PANEL_SERVICE_NAME, dry_run=STATE.dry_run)
+    if not STATE.dry_run:
+        info("面板服务已停止。")
+
+
+@panel_app.command("restart")
+def panel_restart() -> None:
+    """重启面板服务。"""
+    _panel_installed_or_die()
+    svc.stop(PANEL_SERVICE_NAME, dry_run=STATE.dry_run)
+    svc.start(PANEL_SERVICE_NAME, dry_run=STATE.dry_run)
+    info("面板服务已重启。")
+
+
+@panel_app.command("status")
+def panel_status() -> None:
+    """查看面板服务状态。"""
+    _panel_installed_or_die()
+    print(svc.status_text(PANEL_SERVICE_NAME))
+
+
+@panel_app.command("logs")
+def panel_logs(
+    follow: bool = typer.Option(False, "--follow", "-f", help="持续跟踪"),
+    lines: int = typer.Option(100, "--lines", "-n", min=1),
+) -> None:
+    """查看面板服务日志。"""
+    args = ["journalctl", "--user", "-u", PANEL_SERVICE_NAME, "-n", str(lines), "--no-pager"]
+    if follow:
+        args.append("-f")
+    raise typer.Exit(subprocess.run(args, check=False).returncode)
+
+
+@panel_app.command("uninstall")
+def panel_uninstall() -> None:
+    """移除面板服务（不影响其他功能）。"""
+    unit_path = _panel_service_path()
+    if svc.service_available():
+        svc.stop(PANEL_SERVICE_NAME, dry_run=STATE.dry_run)
+        svc.disable(PANEL_SERVICE_NAME, dry_run=STATE.dry_run)
+    if STATE.dry_run:
+        print(f"[DRY-RUN] rm -f {unit_path}")
+    else:
+        unit_path.unlink(missing_ok=True)
+    svc.daemon_reload(dry_run=STATE.dry_run)
+    info("面板服务已移除。")
+
+
+def _panel_installed_or_die() -> None:
+    if not _panel_service_path().exists():
+        die("面板服务未安装；先运行 llamacpp-py panel install。")
+
+
 @app.command()
 def uninstall(
     purge: bool = typer.Option(False, "--purge", help="同时删除源码、构建目录和配置"),
@@ -975,25 +1145,6 @@ def monitor_config_command(
         if key == "PANEL_KEY":
             value = "********" if value else "(未设置)"
         print(f"{key}={value}")
-
-
-@app.command()
-def panel(
-    host: str = typer.Option("127.0.0.1", "--host", help="监听地址（默认仅本机）"),
-    port: int = typer.Option(8199, "--port", min=1, max=65535),
-) -> None:
-    """启动 Web 管理面板。认证密钥在 monitor.env 的 PANEL_KEY。"""
-    from .panel import serve
-
-    if host not in ("127.0.0.1", "localhost"):
-        cfg = load_monitor_config_safe()
-        if cfg is not None and not cfg.PANEL_KEY:
-            warn("面板监听非本机地址但未设置 PANEL_KEY，任何人都可以访问！")
-    info(f"面板地址:http://{host}:{port}/")
-    try:
-        serve(host=host, port=port)
-    except OSError as exc:
-        die(f"面板启动失败:{exc}")
 
 
 def load_monitor_config_safe():

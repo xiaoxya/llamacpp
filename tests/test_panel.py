@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import subprocess as sp
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,8 @@ from llamacpp.monitor import MonitorConfig, save_monitor_config
 from llamacpp.panel import create_app
 
 HTMX_HEADERS = {"User-Agent": "panel-test"}
+
+SRC = str(Path(__file__).resolve().parents[1] / "src")
 
 
 @pytest.fixture
@@ -151,3 +156,82 @@ class TestProfilesPage:
         client = make_client(env)
         resp = client.post("/profiles/use", data={"name": "p1"}, headers=HTMX_HEADERS)
         assert resp.status_code == 303
+
+
+class TestPanelServiceCommands:
+    def test_render_unit(self):
+        from llamacpp.panel import render_panel_unit
+
+        unit = render_panel_unit("/home/x/.local/bin/llamacpp-py", "0.0.0.0", 8199)
+        assert "ExecStart=/home/x/.local/bin/llamacpp-py panel serve --host 0.0.0.0 --port 8199" in unit
+        assert "Restart=on-failure" in unit
+        assert "[Install]" in unit
+
+    def test_install_writes_unit(self, env, monkeypatch):
+        tmp_path, _server_env, _db = env
+        import llamacpp.panel.app as panel_app
+        import llamacpp.service as svc
+
+        monkeypatch.setattr(svc, "daemon_reload", lambda dry_run=False: None)
+        monkeypatch.setattr(svc, "enable", lambda name, dry_run=False: None)
+        monkeypatch.setattr(panel_app.svc, "daemon_reload", lambda dry_run=False: None)
+        monkeypatch.setattr(panel_app.svc, "enable", lambda name, dry_run=False: None)
+
+        client = make_client(env)  # 仅确保 app 可构建；CLI 走 subprocess
+        del client
+        from llamacpp.paths import systemd_user_dir
+        import os
+        import subprocess as sp
+
+        env_vars = dict(os.environ)
+        env_vars.update({
+            "PYTHONPATH": SRC,
+            "HOME": str(tmp_path),
+            "XDG_CONFIG_HOME": str(tmp_path / ".config"),
+            "XDG_DATA_HOME": str(tmp_path / ".local/share"),
+        })
+        result = sp.run(
+            [sys.executable, "-m", "llamacpp", "panel", "install",
+             "--host", "127.0.0.1", "--no-start"],
+            capture_output=True, text=True, env=env_vars, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        unit = tmp_path / ".config/systemd/user/llamacpp-panel.service"
+        assert unit.exists()
+        assert "panel serve --host 127.0.0.1 --port 8199" in unit.read_text()
+
+    def test_install_lan_requires_key(self, env):
+        import os
+        import subprocess as sp
+
+        tmp_path = env[0]
+        env_vars = dict(os.environ)
+        env_vars.update({
+            "PYTHONPATH": SRC,
+            "HOME": str(tmp_path),
+            "XDG_CONFIG_HOME": str(tmp_path / ".config"),
+            "XDG_DATA_HOME": str(tmp_path / ".local/share"),
+        })
+        # 未设置 PANEL_KEY，监听 0.0.0.0 必须被拒绝且不产生 unit 文件
+        result = sp.run(
+            [sys.executable, "-m", "llamacpp", "panel", "install",
+             "--host", "0.0.0.0", "--no-start"],
+            capture_output=True, text=True, env=env_vars, check=False,
+        )
+        assert result.returncode != 0
+        assert "PANEL_KEY" in (result.stderr + result.stdout)
+        assert not (tmp_path / ".config/systemd/user/llamacpp-panel.service").exists()
+
+    def test_cli_panel_help(self, env):
+        import os
+        import subprocess as sp
+
+        tmp_path = env[0]
+        env_vars = dict(os.environ)
+        env_vars["PYTHONPATH"] = SRC
+        env_vars["HOME"] = str(tmp_path)
+        result = sp.run([sys.executable, "-m", "llamacpp", "panel", "--help"],
+                        capture_output=True, text=True, env=env_vars, check=False)
+        assert result.returncode == 0
+        for cmd in ("serve", "install", "start", "stop", "restart", "status", "logs"):
+            assert cmd in result.stdout

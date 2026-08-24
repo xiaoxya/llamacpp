@@ -58,8 +58,15 @@ llamacpp-py monitor config                 # 生成/查看 monitor.env（阈值�
 llamacpp-py monitor run                    # 启动采样循环（可注册为 systemd 服务）
 llamacpp-py monitor status                 # 最近吞吐与告警
 
-llamacpp-py panel                          # 启动面板 http://127.0.0.1:8199/
-# 局域网访问时先在 monitor.env 设置 PANEL_KEY 启用登录认证
+llamacpp-py panel                          # 前台启动面板 http://127.0.0.1:8199/
+
+# 局域网访问 + 后台常驻（推荐）：
+#   1. 在 monitor.env 设置 PANEL_KEY="长随机密钥" 启用登录认证
+#   2. 安装为 systemd user service（默认监听 0.0.0.0:8199）
+llamacpp-py panel install                  # 注册服务并立即后台启动
+llamacpp-py panel start|stop|restart       # 日常管理
+llamacpp-py panel status / logs -f         # 状态与日志
+llamacpp-py panel uninstall                # 移除服务
 
 llamacpp-py profile create myprofile       # 快照当前启动配置
 llamacpp-py profile list && llamacpp-py profile use myprofile

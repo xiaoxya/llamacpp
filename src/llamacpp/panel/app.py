@@ -267,3 +267,28 @@ def serve(host: str, port: int, config_dir: Path | None = None) -> None:
 
     app = create_app(config_dir=config_dir)
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+PANEL_SERVICE_NAME = "llamacpp-panel.service"
+
+PANEL_UNIT_TEMPLATE = """\
+[Unit]
+Description=llamacpp Web admin panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={manager} panel serve --host {host} --port {port}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def render_panel_unit(manager_path: str, host: str, port: int) -> str:
+    return PANEL_UNIT_TEMPLATE.format(manager=manager_path, host=host, port=port)

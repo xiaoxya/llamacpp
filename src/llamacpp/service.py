@@ -57,6 +57,10 @@ def _systemctl(*args: str, check: bool = False) -> subprocess.CompletedProcess:
     )
 
 
+def service_available() -> bool:
+    return systemctl_available()
+
+
 def service_file_exists(service_path: Path) -> bool:
     return systemctl_available() and service_path.exists()
 
