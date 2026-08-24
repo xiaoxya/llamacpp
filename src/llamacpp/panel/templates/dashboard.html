@@ -2,8 +2,8 @@
 {% block title %}仪表盘 · llamacpp{% endblock %}
 {% block nav_dashboard %}active{% endblock %}
 {% block head %}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.min.css">
-<script src="https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.iife.min.js"></script>
+<link rel="stylesheet" href="/static/uplot.min.css">
+<script src="/static/uplot.iife.min.js"></script>
 <style>
   .gpu-card { padding: 14px 16px; }
   .gpu-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
@@ -173,13 +173,25 @@ function updateChart(series) {
 }
 
 function apply(data) {
+  try {
   const pill = document.getElementById('svc-pill');
   pill.className = 'pill ' + (data.service_active ? 'ok' : 'bad');
   pill.innerHTML = `<span class="dot ${data.service_active ? 'ok' : 'bad'}"></span>${data.service_active ? '运行中' : '已停止'}`;
 
+  const chip = document.getElementById('sampler-chip');
+  const s = data.sampler || {};
+  if (s.running) {
+    chip.className = 'pill ok';
+    chip.innerHTML = `<span class="dot ok"></span>采样器运行中 · ${s.age_seconds}s 前`;
+  } else {
+    chip.className = 'pill';
+    chip.innerHTML = '<span class="dot bad"></span>采样器未运行';
+  }
+  } catch (e) { console.error('apply/状态区', e); }
+
+  try {
   const tpsEl = document.getElementById('tps-now');
   const note = document.getElementById('tps-note');
-  const s = data.sampler || {};
   if (data.tps_now != null) {
     tpsEl.textContent = data.tps_now.toFixed(1);
     tpsEl.style.opacity = '';
@@ -197,26 +209,38 @@ function apply(data) {
   const peak = Math.max(0, ...data.series.map(p => p[1]));
   document.getElementById('chart-peak').textContent =
     data.series.length > 1 ? `峰值 ${peak.toFixed(1)} tok/s` : '峰值 --';
+  } catch (e) { console.error('apply/吞吐区', e); }
 
-  if (data.model) document.getElementById('model-name').textContent = data.model,
-                   document.getElementById('stat-model').textContent = data.model;
+  try { renderGpus(data.gpus); } catch (e) { console.error('apply/GPU', e); }
+  try { updateChart(data.series); } catch (e) { console.error('apply/图表', e); }
+  try { renderAlerts(data.alerts); } catch (e) { console.error('apply/告警', e); }
 
-  renderGpus(data.gpus);
-  updateChart(data.series);
-  renderAlerts(data.alerts);
+  try {
+    if (data.model) {
+      document.getElementById('model-name').textContent = data.model;
+      document.getElementById('stat-model').textContent = data.model;
+    }
+  } catch (e) { console.error('apply/模型名', e); }
 }
 
 async function poll() {
   try {
     const r = await fetch('/api/live');
     if (r.status === 401) { location.href = '/login'; return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     apply(await r.json());
-  } catch (e) { /* 网络抖动跳过本轮 */ }
+    document.getElementById('js-error').style.display = 'none';
+  } catch (e) {
+    const box = document.getElementById('js-error');
+    box.style.display = 'block';
+    box.textContent = '数据刷新失败：' + e.message + '（将继续重试）';
+  }
 }
 
 poll();
 setInterval(() => { if (!document.hidden) poll(); }, REFRESH_MS);
 window.addEventListener('resize', () => chart && chart.resize(
-  document.getElementById('chart').clientWidth, chart.height));
+  document.getElementById('chart').clientWidth, chart.height));</script>
+<div id="js-error" style="display:none;margin-top:12px;color:var(--bad)"></div>
 </script>
 {% endblock %}

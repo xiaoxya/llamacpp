@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import paths
@@ -90,6 +91,12 @@ def create_app(
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     app = FastAPI(title="llamacpp panel", docs_url=None, redoc_url=None)
+    # 前端依赖全部本地化，不依赖外部 CDN（国内网络不可靠）
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(TEMPLATES_DIR.parent / "static")),
+        name="static",
+    )
 
     handle: SamplerHandle | None = None
     sampler_cfg: MonitorConfig | None = None
