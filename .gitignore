@@ -1,0 +1,15 @@
+# 编辑器临时文件
+*.swp
+*.swo
+*~
+
+# 测试与构建产物
+/tmp/
+/dist/
+*.tmp.*
+__pycache__/
+.pytest_cache/
+.venv/
+
+# 本地环境
+.env
