@@ -4,7 +4,8 @@ Arch Linux 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署/管理器。
 
 针对 Intel i7-11700 / 64GB RAM / RTX 4070 SUPER + RTX 3060 调优，提供从
 依赖安装、CUDA 编译、systemd user service 到日常运维（配置、模型选择、
-监控、benchmark）的完整闭环。
+监控、benchmark）的完整闭环。当前包含 **Bash 与 Python 双实现**，共享同一份
+`~/.config/llamacpp/*.env` 配置（已由测试验证双向兼容）。
 
 ## 功能特性
 
@@ -15,12 +16,12 @@ Arch Linux 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署/管理器。
 - **OpenAI / Anthropic 兼容 API**：`http://HOST:8080/v1` 与
   `http://HOST:8080/v1/messages`，自带 Web UI
 - **配置即数据**：`server.env` / `build.env` 以纯数据格式解析，
-  绝不作为 shell 代码 source，杜绝注入
+  绝不作为 shell/Python 代码执行，杜绝注入
 - **运维工具集**：doctor 系统自检、HTTP 自检、llama-bench 基准测试、
   日志跟踪、交互式菜单
 - **安全默认值**：API Key 支持、卸载永远不碰模型目录、危险路径拒绝删除
 
-## 快速开始
+## 快速开始（Bash 版）
 
 ```bash
 ./llamacpp.sh install          # 安装依赖 + 编译 + 生成 service
@@ -30,7 +31,17 @@ Arch Linux 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署/管理器。
 ./llamacpp.sh doctor           # 系统/驱动/CUDA/编译/配置全面自检
 ```
 
-安装后可通过 `~/.local/bin/llamacpp` 直接调用。
+## 快速开始（Python 版）
+
+```bash
+make install-user              # 安装到 ~/.local/bin/llamacpp-py
+llamacpp-py --version
+llamacpp-py config --show      # 直接读取 Bash 版写出的配置
+llamacpp-py models             # 子命令与 Bash 版一一对应
+```
+
+两个版本读写同一份 `~/.config/llamacpp/server.env` 与 `build.env`，
+可随时互换接管，无需重新安装或迁移。
 
 ## 常用命令
 
@@ -47,33 +58,33 @@ Arch Linux 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署/管理器。
 | `menu` | 交互式管理菜单 |
 | `uninstall --purge` | 卸载（purge 连源码与配置一起删） |
 
-完整选项见 `./llamacpp.sh --help`。
-
-## 配置文件
-
-| 文件 | 用途 |
-| --- | --- |
-| `~/.config/llamacpp/server.env` | llama-server 启动参数 |
-| `~/.config/llamacpp/build.env` | 编译参数（CUDA 架构、并行度、git ref） |
-
-可直接编辑后 `systemctl --user restart llamacpp`，或使用
-`llamacpp config KEY VALUE` / `llamacpp config --wizard`。
+完整选项见 `--help`。
 
 ## 开发
 
 ```bash
-make check     # lint（bash -n + shellcheck）+ 单元测试
-make lint      # 仅 lint
-make test      # 仅单元测试（零依赖纯 Bash 实现）
+make check     # lint + 全部测试（Bash 与 Python）
+make lint      # bash -n + shellcheck
+make test      # Bash 单元测试（零依赖纯 Bash 实现）
+make test-py   # Python pytest 测试
+make format    # shfmt 格式化（需自行安装）
+make install-user  # 安装 Python 版 CLI 到 ~/.local/bin/llamacpp-py
 ```
 
-单元测试通过 `source llamacpp.sh` 复用其函数，覆盖配置解析校验、
-启动命令构建、模型扫描等纯逻辑；机器相关检查不在测试范围内。
+- Bash 测试通过 `source llamacpp.sh` 复用其函数；机器相关检查不在覆盖范围。
+- Python 测试覆盖配置往返兼容、启动命令构建、模型扫描、GPU 解析、
+  unit 文件渲染及 CLI 子进程冒烟。
+
+### 双实现并存约定
+
+- **Bash 版**（`llamacpp.sh`）：当前生产版本，命令名 `llamacpp`
+- **Python 版**（`src/llamacpp/`）：阶段 C 重写，命令名 `llamacpp-py`
 
 ## 项目路线
 
 - **阶段 A（已完成）**：工程化整理——仓库结构、lint 门禁、单元测试、文档
-- **阶段 C**：Python 重写（typer CLI），配置文件完全兼容，平滑接管
+- **阶段 C（进行中）**：Python 重写完成核心模块，配置双向兼容；
+  待真机验收后切换默认
 - **阶段 B'**：Profile 多配置、SQLite 监控告警（Webhook 通知）、
   FastAPI + HTMX Web 管理面板
 
