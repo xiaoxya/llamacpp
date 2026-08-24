@@ -24,7 +24,7 @@ DEFAULT_DB_PATH = Path.home() / ".local/share/llamacpp/metrics.db"
 MONITOR_KEYS = (
     "INTERVAL", "TEMP_MAX", "MEM_PCT_MAX", "HEALTH_FAIL_MAX",
     "WEBHOOK_URL", "WEBHOOK_FORMAT", "TELEGRAM_CHAT_ID", "API_KEY", "PORT",
-    "HOST", "ALERT_COOLDOWN", "PANEL_KEY",
+    "HOST", "ALERT_COOLDOWN", "PANEL_KEY", "ENABLE_SAMPLER",
 )
 
 
@@ -42,8 +42,10 @@ class MonitorConfig:
     HOST: str = "127.0.0.1"
     PORT: str = "8080"
     PANEL_KEY: str = ""   # 面板登录密钥；为空则不启用认证（默认仅监听 localhost）
+    ENABLE_SAMPLER: str = "true"  # false 时面板不启动内嵌采样线程
 
     def __post_init__(self) -> None:
+        self.ENABLE_SAMPLER = self.ENABLE_SAMPLER.strip().lower()
         # env 文件读出的数值键统一转为 int
         for key in ("INTERVAL", "TEMP_MAX", "MEM_PCT_MAX", "HEALTH_FAIL_MAX", "ALERT_COOLDOWN"):
             value = getattr(self, key)
@@ -125,6 +127,7 @@ def save_monitor_config(cfg: MonitorConfig, path: Path) -> None:
         f"HOST={cfg.HOST}",
         f"PORT={cfg.PORT}",
         f"PANEL_KEY={cfg.PANEL_KEY}",
+        f"ENABLE_SAMPLER={cfg.ENABLE_SAMPLER}",
     ]
     atomic_write(path, "\n".join(lines) + "\n")
 

@@ -355,3 +355,35 @@ class TestEmbeddedSampler:
         # 停止后不再增长（可能存在一次进行中的调用）
         assert calls["n"] - n_before <= 1
 
+
+
+class TestSamplerToggle:
+    def test_disabled_sampler_does_not_start(self, env):
+        """monitor.env 设 ENABLE_SAMPLER=false 时面板不启动采样线程。"""
+        tmp_path = env[0]
+        (tmp_path / "monitor.env").write_text(
+            "ENABLE_SAMPLER=false\n", encoding="utf-8")
+        app = create_app(config_dir=tmp_path, db_path=tmp_path / "m.db",
+                         start_sampler=True)
+        assert not hasattr(app.state, "sampler_stop"), "采样线程不应启动"
+
+    def test_default_starts_thread(self, env):
+        import time as time_mod
+
+        import llamacpp.monitor as mon
+
+        calls = {"n": 0}
+        def fake(db, cfg, alerter, prev, diag=None):
+            calls["n"] += 1
+            return None, []
+        monkey_orig = mon.sample_once
+        mon.sample_once = fake
+        try:
+            client = make_client(env, start_sampler=True)
+            deadline = time_mod.time() + 3
+            while time_mod.time() < deadline and calls["n"] == 0:
+                time_mod.sleep(0.05)
+            client.app.state.sampler_stop.set()
+        finally:
+            mon.sample_once = monkey_orig
+        assert calls["n"] >= 1, "默认应启动采样线程"

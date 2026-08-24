@@ -1129,6 +1129,9 @@ def monitor_run(
                                   server_env_path=paths.server_config_file())
     except ValueError as exc:
         die(str(exc))
+    if cfg.ENABLE_SAMPLER.lower() == "false":
+        die("采样器已被 monitor.env 的 ENABLE_SAMPLER=false 禁用；"
+            "如需启用请改为 true 后重试。")
     db_path = paths.data_home() / "llamacpp" / "metrics.db"
     run_loop(db_path, cfg, once=once or STATE.dry_run)
 

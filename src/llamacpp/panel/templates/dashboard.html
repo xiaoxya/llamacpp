@@ -81,6 +81,10 @@
 <script>
 const REFRESH_MS = 5000;
 
+function tempClass(t) {
+  return t == null ? '' : (t >= 75 ? 't-bad' : t >= 60 ? 't-warn' : 't-ok');
+}
+
 function renderGpus(gpus) {
   const box = document.getElementById('gpu-cards');
   if (!gpus.length) { box.innerHTML = '<span class="muted small">nvidia-smi 不可用。</span>'; return; }

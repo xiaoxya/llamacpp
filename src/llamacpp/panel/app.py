@@ -108,12 +108,18 @@ def create_app(
         except Exception:  # noqa: BLE001 — 配置缺失/损坏时用默认阈值
             sampler_cfg = MonitorConfig()
 
+        sampler_enabled = sampler_cfg.ENABLE_SAMPLER.lower() != "false"
+
         def _run() -> None:
             _sampler_loop(db_path, sampler_cfg, handle)
 
-        handle.thread = threading.Thread(target=_run, daemon=True, name="llamacpp-sampler")
-        handle.thread.start()
-        app.state.sampler_stop = handle.stop
+        if not sampler_enabled:
+            print("[INFO] 采样器已通过 monitor.env ENABLE_SAMPLER=false 禁用。", flush=True)
+        else:
+            handle.thread = threading.Thread(target=_run, daemon=True,
+                                             name="llamacpp-sampler")
+            handle.thread.start()
+            app.state.sampler_stop = handle.stop
 
     sampler = handle
 
