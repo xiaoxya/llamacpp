@@ -253,3 +253,20 @@ class TestLoginWithQuotedKey:
         token = hashlib.sha256(b"llamacpp-panel:sekrit").hexdigest()
         client.cookies.set("panel_token", token)
         assert client.get("/", headers=HTMX_HEADERS).status_code == 200
+
+
+class TestApiLive:
+    def test_open_access_returns_payload(self, env):
+        import json
+
+        client = make_client(env)
+        resp = client.get("/api/live", headers=HTMX_HEADERS)
+        assert resp.status_code == 200
+        data = json.loads(resp.text)
+        for key in ("service_active", "model", "gpus", "tps_now", "series", "alerts"):
+            assert key in data
+
+    def test_auth_required_when_key_set(self, env):
+        client = make_client(env, panel_key="k1")
+        resp = client.get("/api/live", headers=HTMX_HEADERS)
+        assert resp.status_code == 401

@@ -14,7 +14,6 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from markupsafe import Markup
 
 from .. import paths
 from .. import service as svc
@@ -41,25 +40,6 @@ COOKIE_NAME = "panel_token"
 
 def _token_for(key: str) -> str:
     return hashlib.sha256(("llamacpp-panel:" + key).encode()).hexdigest()
-
-
-def sparkline(points: list[tuple[float, float]], width: int = 480, height: int = 80) -> str:
-    """把 (ts, tps) 序列渲染为内联 SVG 折线。"""
-    values = [v for _, v in points]
-    if len(values) < 2 or max(values) <= 0:
-        return "<svg class='spark' viewBox='0 0 480 80'><text x='12' y='46' fill='#8a93a2'>暂无吞吐数据</text></svg>"
-    peak = max(values)
-    step = width / (len(values) - 1)
-    coords = [
-        f"{i * step:.1f},{height - 6 - (v / peak) * (height - 16):.1f}"
-        for i, v in enumerate(values)
-    ]
-    return (
-        f"<svg class='spark' viewBox='0 0 {width} {height}' preserveAspectRatio='none'>"
-        f"<polyline fill='none' stroke='#4f9cf9' stroke-width='2' points='{' '.join(coords)}'/>"
-        f"<text x='{width - 8}' y='14' text-anchor='end' fill='#8a93a2'>峰值 {peak:.1f} tok/s</text>"
-        "</svg>"
-    )
 
 
 def create_app(
@@ -132,22 +112,51 @@ def create_app(
     async def dashboard(request: Request):
         require_auth(request)
         cfg = load_all()
-        from ..gpu import list_gpus
-
-        gpus = list_gpus()
         service_name = paths.service_file().name
-        service_active = svc.is_active(service_name)
         conn = connect(db_path)
-        tps_points = latest_tps(conn)
-        alerts = recent_alerts(conn, limit=10)
+        alerts = recent_alerts(conn, limit=8)
         conn.close()
         return render(
             request, "dashboard.html",
-            cfg=cfg, gpus=gpus, service_active=service_active,
-            service_name=service_name, spark=Markup(sparkline(tps_points)),
-            tps_now=(tps_points[-1][1] if tps_points else None),
-            alerts=alerts, model=cfg.MODEL or "(未选择)",
+            cfg=cfg, service_name=service_name,
+            model=cfg.MODEL or "(未选择)",
+            alerts=alerts,
         )
+
+    @app.get("/api/live")
+    async def api_live(request: Request):
+        """仪表盘轮询接口：GPU、服务状态、吞吐序列与最近告警。"""
+        key = load_panel_key()
+        if key and request.cookies.get(COOKIE_NAME) != _token_for(key):
+            raise HTTPException(status_code=401)
+        cfg = load_all()
+        from ..gpu import list_gpus
+
+        gpus = list_gpus()
+        service_active = svc.is_active(paths.service_file().name)
+        conn = connect(db_path)
+        tps_points = latest_tps(conn, limit=120)
+        alerts = recent_alerts(conn, limit=8)
+        conn.close()
+        return {
+            "service_active": service_active,
+            "model": cfg.MODEL or None,
+            "profile": _active_profile_name(),
+            "gpus": [
+                {
+                    "index": g.index, "name": g.name,
+                    "mem_used": g.memory_total_mib - g.memory_free_mib,
+                    "mem_total": g.memory_total_mib,
+                    "temp": g.temperature, "driver": g.driver_version,
+                }
+                for g in gpus
+            ],
+            "tps_now": tps_points[-1][1] if tps_points else None,
+            "series": [[int(t * 1000), round(v, 2)] for t, v in tps_points],
+            "alerts": [
+                [row[0], row[1], row[3], bool(row[4])] for row in alerts
+            ],
+        }
 
     @app.post("/service/{action}")
     async def service_action(request: Request, action: str):
@@ -178,7 +187,7 @@ def create_app(
             except OSError:
                 size = "?"
             items.append({"path": str(p), "name": p.name, "size": size})
-        return render(request, "models.html", models=items, current=cfg.MODEL)
+        return render(request, "models.html", cfg=cfg, models=items, current=cfg.MODEL)
 
     @app.post("/models/select")
     async def models_select(request: Request, path: str = Form(...)):

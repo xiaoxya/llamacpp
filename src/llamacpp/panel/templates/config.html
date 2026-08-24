@@ -1,8 +1,11 @@
 {% extends "base.html" %}
-{% block title %}配置 · llamacpp 面板{% endblock %}
+{% block title %}配置 · llamacpp{% endblock %}
+{% block nav_config %}active{% endblock %}
 {% block content %}
 <h2>启动配置</h2>
-{% if saved %}<div class="card"><span class="pill ok">已保存，重启服务后生效</span></div>{% endif %}
+<div class="sub">server.env · 修改保存后需重启推理服务生效</div>
+
+{% if saved %}<div class="card"><span class="pill ok"><span class="dot ok"></span>已保存，重启服务后生效</span></div>{% endif %}
 {% if error %}<div class="card"><span class="pill bad">{{ error }}</span></div>{% endif %}
 
 <form method="post" action="/config">
@@ -18,8 +21,10 @@
     {% endif %}
   </label>
   {% endfor %}
-  <p><button>保存配置</button>
-     <span class="muted">保存后需重启服务：systemctl --user restart llamacpp.service</span></p>
+</div>
+<div class="row">
+  <button>保存配置</button>
+  <span class="muted small">重启命令：<code>llamacpp-py restart</code> 或面板仪表盘的「重启」按钮</span>
 </div>
 </form>
 {% endblock %}

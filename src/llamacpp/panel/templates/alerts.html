@@ -1,23 +1,34 @@
 {% extends "base.html" %}
-{% block title %}告警 · llamacpp 面板{% endblock %}
+{% block title %}告警 · llamacpp{% endblock %}
+{% block nav_alerts %}active{% endblock %}
 {% block content %}
 <h2>告警历史</h2>
+<div class="sub">监控采样器写入 · 阈值配置在 monitor.env</div>
+
 <div class="card">
   {% if alerts %}
   <table>
-    <tr><th>时间</th><th>规则</th><th>级别</th><th>消息</th><th>Webhook</th></tr>
+    <thead><tr><th>时间</th><th>规则</th><th>级别</th><th>消息</th><th>Webhook</th></tr></thead>
+    <tbody>
     {% for ts, rule, level, message, delivered in alerts %}
-    <tr>
-      <td class="muted">{{ ts | int }}</td>
-      <td><code>{{ rule }}</code></td>
-      <td>{{ level }}</td>
-      <td>{{ message }}</td>
-      <td>{{ "已发送" if delivered else "仅记录" }}</td>
-    </tr>
+      <tr>
+        <td class="muted num small">{{ ts | int }}</td>
+        <td><code>{{ rule }}</code></td>
+        <td><span class="pill bad">{{ level }}</span></td>
+        <td>{{ message }}</td>
+        <td>
+          {% if delivered %}<span class="pill ok">已通知</span>
+          {% else %}<span class="muted small">仅记录</span>{% endif %}
+        </td>
+      </tr>
     {% endfor %}
+    </tbody>
   </table>
   {% else %}
-  <p class="muted">暂无告警。配置监控参数：~/.config/llamacpp/monitor.env</p>
+  <p class="muted" style="margin:4px 0 0">
+    暂无告警。先启动采样器：<code>llamacpp-py monitor run</code>，
+    阈值与 Webhook 在 <code>monitor.env</code> 配置。
+  </p>
   {% endif %}
 </div>
 {% endblock %}

@@ -1,29 +1,40 @@
 {% extends "base.html" %}
-{% block title %}Profile · llamacpp 面板{% endblock %}
+{% block title %}Profile · llamacpp{% endblock %}
+{% block nav_profiles %}active{% endblock %}
 {% block content %}
 <h2>Profile 多配置</h2>
+<div class="sub">一套启动参数快照 · use 即写入 server.env，重启服务生效</div>
+
 <div class="card">
   {% if profiles %}
   <table>
-    <tr><th>名称</th><th>状态</th><th></th></tr>
+    <thead><tr><th>名称</th><th>状态</th><th></th></tr></thead>
+    <tbody>
     {% for name in profiles %}
-    <tr>
-      <td><code>{{ name }}</code></td>
-      <td>{% if name == active %}<span class="pill ok">激活中</span>{% else %}<span class="muted">未激活</span>{% endif %}</td>
-      <td>
-        {% if name != active %}
-        <form method="post" action="/profiles/use">
-          <input type="hidden" name="name" value="{{ name }}">
-          <button>切换到此配置</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
+      <tr>
+        <td class="num">{{ name }}</td>
+        <td>
+          {% if name == active %}
+          <span class="pill ok"><span class="dot ok"></span>激活中</span>
+          {% else %}
+          <span class="pill">未激活</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right">
+          {% if name != active %}
+          <form method="post" action="/profiles/use">
+            <input type="hidden" name="name" value="{{ name }}">
+            <button>切换到此配置</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
     {% endfor %}
+    </tbody>
   </table>
   {% else %}
-  <p class="muted">还没有 profile。用 CLI 创建：
-     <code>llamacpp-py profile create &lt;名字&gt;</code></p>
+  <p class="muted" style="margin:4px 0 0">还没有 profile。用 CLI 创建：
+  <code>llamacpp-py profile create &lt;名字&gt;</code></p>
   {% endif %}
 </div>
 {% endblock %}

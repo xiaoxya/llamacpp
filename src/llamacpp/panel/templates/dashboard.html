@@ -1,55 +1,203 @@
 {% extends "base.html" %}
-{% block title %}仪表盘 · llamacpp 面板{% endblock %}
+{% block title %}仪表盘 · llamacpp{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.iife.min.js"></script>
+<style>
+  .gpu-card { padding: 14px 16px; }
+  .gpu-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .gpu-idx {
+    font-family: var(--mono); font-size: 11px; color: var(--cyan);
+    border: 1px solid rgba(34,211,238,.35); border-radius: 6px; padding: 0 7px;
+    background: rgba(34,211,238,.07);
+  }
+  .gpu-name { font-weight: 600; font-size: 13px; flex: 1; min-width: 0;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gpu-temp { font-family: var(--mono); font-size: 12px; }
+  .t-ok{color:var(--ok)} .t-warn{color:var(--warn)} .t-bad{color:var(--bad)}
+  .gpu-meta { display: flex; justify-content: space-between; margin-top: 6px;
+              font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+  #chart { width: 100%; }
+</style>
+{% endblock %}
 {% block content %}
 <h2>仪表盘</h2>
+<div class="sub">双卡推理实时状态 · 每 5 秒自动刷新</div>
 
 <div class="card">
-  <div class="row">
-    <strong>服务 {{ service_name }}</strong>
-    {% if service_active %}<span class="pill ok">运行中</span>
-    {% else %}<span class="pill bad">已停止</span>{% endif %}
-    <form method="post" action="/service/start" hx-post="/service/start"><button>启动</button></form>
-    <form method="post" action="/service/restart" hx-post="/service/restart"><button class="warn">重启</button></form>
-    <form method="post" action="/service/stop" hx-post="/service/stop"><button class="danger">停止</button></form>
+  <div class="row spread">
+    <div class="row">
+      <strong>推理服务</strong>
+      <span class="pill bad" id="svc-pill"><span class="dot bad"></span>检测中…</span>
+      <code id="model-name">{{ model }}</code>
+      {% if active_profile %}<span class="pill">profile · {{ active_profile }}</span>{% endif %}
+    </div>
+    <div class="row">
+      <form method="post" action="/service/start"><button hx-post="/service/start">启动</button></form>
+      <form method="post" action="/service/restart"><button class="warn" hx-post="/service/restart">重启</button></form>
+      <form method="post" action="/service/stop"><button class="danger" hx-post="/service/stop">停止</button></form>
+    </div>
   </div>
-  <p class="muted" style="margin-bottom:0">当前模型：<code>{{ model }}</code>
-     {% if active_profile %}· Profile：<code>{{ active_profile }}</code>{% endif %}</p>
+</div>
+
+<div class="grid g3">
+  <div class="card">
+    <div class="stat-label">生成吞吐 tok/s</div>
+    <div class="hero-num" id="tps-now">--</div>
+    <div class="small muted num" id="chart-peak">峰值 --</div>
+  </div>
+  <div class="card">
+    <div class="stat-label">当前模型</div>
+    <div class="num small" id="stat-model" style="word-break:break-all">{{ model }}</div>
+  </div>
+  <div class="card">
+    <div class="stat-label">激活 Profile</div>
+    <div class="num">{% if active_profile %}{{ active_profile }}{% else %}<span class="muted">默认配置</span>{% endif %}</div>
+  </div>
 </div>
 
 <div class="card">
-  <div class="row" style="justify-content:space-between">
-    <strong>生成吞吐</strong>
-    <span class="muted">{% if tps_now %}当前 {{ "%.1f"|format(tps_now) }} tok/s{% else %}暂无数据{% endif %}</span>
-  </div>
-  {{ spark }}
-  <p class="muted" style="margin-bottom:0">数据来源：监控采样器（<code>llamacpp-py monitor run</code>）写入的 SQLite。</p>
+  <h3>生成吞吐</h3>
+  <div id="chart"></div>
 </div>
 
 <div class="card">
-  <strong>GPU</strong>
-  {% if gpus %}
+  <h3>GPU 状态</h3>
+  <div class="grid g2" id="gpu-cards">
+    <span class="muted small">加载中…</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row spread" style="margin-bottom:8px">
+    <h3 style="margin:0">最近告警</h3>
+    <a class="btn ghost" href="/alerts">查看全部</a>
+  </div>
   <table>
-    <tr><th>#</th><th>型号</th><th>显存总量</th><th>可用</th><th>温度</th><th>驱动</th></tr>
-    {% for g in gpus %}
-    <tr><td>{{ g.index }}</td><td>{{ g.name }}</td><td>{{ g.memory_total_mib }} MiB</td>
-        <td>{{ g.memory_free_mib }} MiB</td><td>{{ g.temperature or "-" }}℃</td><td>{{ g.driver_version }}</td></tr>
-    {% endfor %}
+    <tbody id="alert-tbody">
+      {% for ts, rule, level, message, delivered in alerts %}
+      <tr>
+        <td class="muted num small">{{ ts | int }}</td>
+        <td><code>{{ rule }}</code></td>
+        <td>{{ message }}</td>
+        <td>{% if delivered %}<span class="pill ok">已通知</span>{% else %}<span class="muted small">仅记录</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">暂无告警</td></tr>
+      {% endfor %}
+    </tbody>
   </table>
-  {% else %}<p class="muted">nvidia-smi 不可用。</p>{% endif %}
 </div>
 
-<div class="card">
-  <div class="row" style="justify-content:space-between">
-    <strong>最近告警</strong><a class="btn" href="/alerts">查看全部</a>
-  </div>
-  {% if alerts %}
-  <table>
-    <tr><th>时间</th><th>规则</th><th>消息</th><th>Webhook</th></tr>
-    {% for ts, rule, level, message, delivered in alerts %}
-    <tr><td class="muted">{{ ts | int }}</td><td><code>{{ rule }}</code></td>
-        <td>{{ message }}</td><td>{{ "已发送" if delivered else "仅记录" }}</td></tr>
-    {% endfor %}
-  </table>
-  {% else %}<p class="muted">暂无告警记录。</p>{% endif %}
-</div>
+<script>
+const REFRESH_MS = 5000;
+let chart = null;
+
+function tempClass(t){ return t == null ? '' : (t >= 75 ? 't-bad' : t >= 60 ? 't-warn' : 't-ok'); }
+
+function renderGpus(gpus) {
+  const box = document.getElementById('gpu-cards');
+  if (!gpus.length) { box.innerHTML = '<span class="muted small">nvidia-smi 不可用。</span>'; return; }
+  box.innerHTML = gpus.map(g => {
+    const pct = g.mem_total > 0 ? Math.round(g.mem_used * 100 / g.mem_total) : 0;
+    const hot = pct >= 90 || (g.temp != null && g.temp >= 75);
+    return `
+    <div class="card gpu-card" style="margin:0">
+      <div class="gpu-head">
+        <span class="gpu-idx">GPU ${g.index}</span>
+        <span class="gpu-name">${g.name}</span>
+        <span class="gpu-temp ${tempClass(g.temp)}">${g.temp != null ? g.temp + '℃' : '--'}</span>
+      </div>
+      <div class="bar ${hot ? 'hot' : ''}"><i style="width:${pct}%"></i></div>
+      <div class="gpu-meta">
+        <span>显存 ${(g.mem_used/1024).toFixed(1)} / ${(g.mem_total/1024).toFixed(1)} GiB（${pct}%）</span>
+        <span>${g.driver || ''}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderAlerts(rows) {
+  const tb = document.getElementById('alert-tbody');
+  if (!rows.length) { tb.innerHTML = '<tr><td colspan="4" class="muted">暂无告警</td></tr>'; return; }
+  tb.innerHTML = rows.map(([ts, rule, message, delivered]) => `
+    <tr>
+      <td class="muted num small">${new Date(ts * 1000).toLocaleTimeString('zh-CN')}</td>
+      <td><code>${rule}</code></td>
+      <td>${message}</td>
+      <td>${delivered ? '<span class="pill ok">已通知</span>' : '<span class="muted small">仅记录</span>'}</td>
+    </tr>`).join('');
+}
+
+function initChart(series) {
+  const data = series.length ? series : [[Date.now(), 0], [Date.now(), 0]];
+  const opts = {
+    width: document.getElementById('chart').clientWidth,
+    height: 190,
+    cursor: { show: true },
+    scales: { x: { time: true } },
+    axes: [
+      { stroke: '#8291a8', grid: { stroke: 'rgba(148,163,184,.08)' }, ticks: { stroke: 'rgba(148,163,184,.15)' } },
+      { stroke: '#8291a8', grid: { stroke: 'rgba(148,163,184,.08)' }, ticks: { stroke: 'rgba(148,163,184,.15)' } },
+    ],
+    series: [
+      {},
+      {
+        label: 'tok/s', stroke: '#22d3ee', width: 2,
+        points: { show: false },
+        fill: (u, i) => createGradient(u),
+      },
+    ],
+  };
+  chart = new uPlot(opts, [data.map(p => p[0]), data.map(p => p[1])],
+                    document.getElementById('chart'));
+}
+
+function createGradient(u) {
+  const ctx = u.ctx;
+  const grad = ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.bottom);
+  grad.addColorStop(0, 'rgba(34,211,238,.28)');
+  grad.addColorStop(1, 'rgba(139,92,246,.02)');
+  return grad;
+}
+
+function updateChart(series) {
+  if (!chart) { initChart(series); return; }
+  const data = series.length ? series : [[Date.now(), 0], [Date.now(), 0]];
+  chart.setData([data.map(p => p[0]), data.map(p => p[1])]);
+}
+
+function apply(data) {
+  const pill = document.getElementById('svc-pill');
+  pill.className = 'pill ' + (data.service_active ? 'ok' : 'bad');
+  pill.innerHTML = `<span class="dot ${data.service_active ? 'ok' : 'bad'}"></span>${data.service_active ? '运行中' : '已停止'}`;
+
+  const tps = document.getElementById('tps-now');
+  tps.textContent = data.tps_now != null ? data.tps_now.toFixed(1) : '--';
+  const peak = Math.max(0, ...data.series.map(p => p[1]));
+  document.getElementById('chart-peak').textContent =
+    data.series.length > 1 ? `峰值 ${peak.toFixed(1)} tok/s` : '峰值 --';
+
+  if (data.model) document.getElementById('model-name').textContent = data.model,
+                   document.getElementById('stat-model').textContent = data.model;
+
+  renderGpus(data.gpus);
+  updateChart(data.series);
+  renderAlerts(data.alerts);
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/api/live');
+    if (r.status === 401) { location.href = '/login'; return; }
+    apply(await r.json());
+  } catch (e) { /* 网络抖动跳过本轮 */ }
+}
+
+poll();
+setInterval(() => { if (!document.hidden) poll(); }, REFRESH_MS);
+window.addEventListener('resize', () => chart && chart.resize(
+  document.getElementById('chart').clientWidth, chart.height));
+</script>
 {% endblock %}
