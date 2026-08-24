@@ -30,7 +30,7 @@ MONITOR_KEYS = (
 
 @dataclass
 class MonitorConfig:
-    INTERVAL: int = 10            # 采样间隔（秒）
+    INTERVAL: int = 3             # 采样间隔（秒）
     TEMP_MAX: int = 85            # GPU 温度告警阈值（℃）
     MEM_PCT_MAX: int = 95         # 显存使用率告警阈值（%）
     HEALTH_FAIL_MAX: int = 3      # 连续 health 失败次数告警

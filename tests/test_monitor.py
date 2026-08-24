@@ -48,7 +48,7 @@ class TestMonitorConfig:
         cfg = load_monitor_config(path)
         assert cfg.TEMP_MAX == 90
         assert cfg.WEBHOOK_URL == "https://x"
-        assert cfg.INTERVAL == 10  # 默认值保留
+        assert cfg.INTERVAL == 3   # 默认值保留
 
     def test_unknown_keys_ignored(self, tmp_path):
         path = tmp_path / "monitor.env"
