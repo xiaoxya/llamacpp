@@ -117,14 +117,16 @@ def _check_conflicting_services() -> None:
 @app.command()
 def install(
     ref: str = typer.Option("master", "--ref", help="Git 分支、tag 或 commit"),
-    driver: str = typer.Option("none", "--driver", help="none、nvidia-open 或 nvidia-open-dkms"),
+    driver: str = typer.Option("none", "--driver", help="auto/nvidia-open/nvidia-open-dkms；Debian 系可用 apt 驱动包名"),
     start: bool = typer.Option(False, "--start", help="安装后启动服务"),
     enable_linger: bool = typer.Option(False, "--enable-linger", help="退出登录后继续运行（需 sudo）"),
 ) -> None:
     """安装构建依赖、编译 llama.cpp 并生成 systemd user service。"""
     family, _distro = assert_supported_linux()
+    # auto：Arch → nvidia-open-dkms；Debian/Ubuntu → 交给 manage_driver 走
+    # ubuntu-drivers（或提示指定 apt 包名），不再静默跳过驱动安装。
     if driver == "auto":
-        driver = "none" if family == "debian" else "nvidia-open-dkms"
+        driver = "nvidia-open-dkms" if family == "arch" else "auto"
     elif family == "arch" and driver not in ("none", "nvidia-open", "nvidia-open-dkms"):
         die("driver 选项无效。")
     install_build_dependencies(non_interactive=STATE.non_interactive, dry_run=STATE.dry_run)

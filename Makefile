@@ -10,7 +10,7 @@ check: lint test test-py
 lint:
 	bash -n $(SCRIPT)
 	bash -n tests/unit.bash
-	shellcheck -S warning $(SCRIPT)
+	shellcheck -S warning $(SCRIPT) scripts/bootstrap.sh
 
 test:
 	bash tests/unit.bash
@@ -20,7 +20,7 @@ test-py:
 
 venv:
 	python3 -m venv .venv
-	.venv/bin/pip install --quiet typer pydantic rich pytest fastapi uvicorn jinja2 httpx python-multipart
+	.venv/bin/pip install --quiet -e ".[panel]" pytest
 
 format:
 	@if command -v shfmt >/dev/null 2>&1; then \
@@ -31,7 +31,7 @@ format:
 
 # 安装 Python 版 CLI 到 ~/.local/bin（不覆盖 Bash 版的 llamacpp 命令）
 install-user: venv
-	.venv/bin/pip install --quiet -e .
+	.venv/bin/pip install --quiet -e ".[panel]"
 	ln -sf $$(realpath .venv/bin/llamacpp) ~/.local/bin/llamacpp-py
 	@echo "已安装：llamacpp-py（Bash 版 llamacpp 保持不变）"
 

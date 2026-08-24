@@ -44,6 +44,21 @@ Arch Linux / Debian / Ubuntu 双 NVIDIA GPU（12GB × 2）llama.cpp 一键部署
 CUDA 路径自动探测（`CUDA_HOME` → `/usr/local/cuda` → `/opt/cuda` → PATH），
 自定义安装只需 `export CUDA_HOME=...`。Python 版子命令在两种家族完全一致。
 
+## 一键部署（Debian/Ubuntu/Arch）
+
+```bash
+# 1) 工具本体（含面板依赖），一条命令：
+bash scripts/bootstrap.sh
+
+# 2) 驱动 + CUDA 编译 + 服务注册，还是一条命令：
+llamacpp-py install --driver auto
+```
+
+或合并执行：`bash scripts/bootstrap.sh --with-driver`
+
+> 唯一的前置条件是机器能联网且有 git；驱动步骤在 Ubuntu 走
+> `ubuntu-drivers autoinstall`，完成后需重启一次再 `llamacpp-py start`。
+
 ## 快速开始（Bash 版）
 
 ```bash
