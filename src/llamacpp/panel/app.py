@@ -114,7 +114,7 @@ def create_app(
     @app.post("/login")
     async def login_submit(request: Request, key: str = Form("")):
         expected = load_panel_key()
-        if expected and key == expected:
+        if expected and key.strip() == expected:
             response = RedirectResponse("/", status_code=303)
             response.set_cookie(COOKIE_NAME, _token_for(expected), httponly=True)
             return response

@@ -169,3 +169,27 @@ class TestSampleOnce:
         prev, fired = sample_once(db, cfg, alerter, None)
         assert prev is None
         assert fired == ["health"]
+
+
+class TestQuotedValues:
+    """回归：用户常按 shell 习惯写 KEY="xxx"，解析必须去引号。"""
+
+    def test_double_quotes_stripped(self, tmp_path):
+        path = tmp_path / "monitor.env"
+        path.write_text('PANEL_KEY="my-secret"\n', encoding="utf-8")
+        assert load_monitor_config(path).PANEL_KEY == "my-secret"
+
+    def test_single_quotes_stripped(self, tmp_path):
+        path = tmp_path / "monitor.env"
+        path.write_text("PANEL_KEY='my-secret'\n", encoding="utf-8")
+        assert load_monitor_config(path).PANEL_KEY == "my-secret"
+
+    def test_plain_value_untouched(self, tmp_path):
+        path = tmp_path / "monitor.env"
+        path.write_text("PANEL_KEY=my-secret\n", encoding="utf-8")
+        assert load_monitor_config(path).PANEL_KEY == "my-secret"
+
+    def test_unpaired_quote_kept(self, tmp_path):
+        path = tmp_path / "monitor.env"
+        path.write_text('PANEL_KEY=my"secret\n', encoding="utf-8")
+        assert load_monitor_config(path).PANEL_KEY == 'my"secret'

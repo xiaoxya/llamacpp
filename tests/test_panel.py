@@ -235,3 +235,21 @@ class TestPanelServiceCommands:
         assert result.returncode == 0
         for cmd in ("serve", "install", "start", "stop", "restart", "status", "logs"):
             assert cmd in result.stdout
+
+
+class TestLoginWithQuotedKey:
+    """端到端：monitor.env 带引号的 PANEL_KEY 也能正常登录。"""
+
+    def test_login_success_with_quoted_config(self, env):
+        tmp_path = env[0]
+        (tmp_path / "monitor.env").write_text(
+            'PANEL_KEY="sekrit"\n', encoding="utf-8"
+        )
+        client = make_client(env)
+        resp = client.post("/login", data={"key": " sekrit "}, headers=HTMX_HEADERS)
+        assert resp.status_code == 303
+        import hashlib
+
+        token = hashlib.sha256(b"llamacpp-panel:sekrit").hexdigest()
+        client.cookies.set("panel_token", token)
+        assert client.get("/", headers=HTMX_HEADERS).status_code == 200

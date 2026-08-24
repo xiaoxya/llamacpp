@@ -752,7 +752,7 @@ def _panel_guard_lan(host: str) -> None:
             f"面板将监听 {host}，但 monitor.env 未设置 PANEL_KEY，"
             "局域网内任何设备都可以访问。请在 "
             f"{paths.config_dir() / 'monitor.env'} 中加入一行：\n"
-            '  PANEL_KEY="一个长随机密钥"\n'
+            '  PANEL_KEY=一个长随机密钥（无需引号）\n'
             "设置后重新执行本命令；或临时加 --yes 强制跳过此检查。"
         )
     info("已启用 PANEL_KEY 认证。")
@@ -775,7 +775,7 @@ def panel_install(
             die(
                 f"监听 {host} 需要 PANEL_KEY 认证。在 "
                 f"{paths.config_dir() / 'monitor.env'} 加入：\n"
-                '  PANEL_KEY="一个长随机密钥"\n'
+                '  PANEL_KEY=一个长随机密钥（无需引号）\n'
                 "或加 --yes 跳过检查（不推荐）。"
             )
         if has_key:

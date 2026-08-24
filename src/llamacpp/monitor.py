@@ -65,6 +65,14 @@ class MonitorConfig:
         return errors
 
 
+def _unquote(value: str) -> str:
+    """去掉值两侧的成对引号（用户常按 shell 习惯写 KEY="xxx"）。"""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        return value[1:-1]
+    return value
+
+
 def load_monitor_config(path: Path) -> MonitorConfig:
     values: dict[str, str] = {}
     if path.exists():
@@ -74,7 +82,7 @@ def load_monitor_config(path: Path) -> MonitorConfig:
                 continue
             key, _, value = line.partition("=")
             if key in MONITOR_KEYS:
-                values[key] = value.strip()
+                values[key] = _unquote(value)
     known = {k: values[k] for k in MONITOR_KEYS if k in values}
     cfg = MonitorConfig(**known)
     errors = cfg.validate()
