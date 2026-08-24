@@ -270,3 +270,53 @@ class TestApiLive:
         client = make_client(env, panel_key="k1")
         resp = client.get("/api/live", headers=HTMX_HEADERS)
         assert resp.status_code == 401
+
+
+class TestLiveThroughput:
+    """回归：不启动 monitor run，面板也应能实时显示 tok/s。"""
+
+    def _mock_metrics(self, monkeypatch, counter=[0.0]):
+        import llamacpp.panel.app as app_mod
+
+        def fake(host, port, api_key=""):
+            counter[0] += 50.0
+            return {"predicted_tokens": counter[0], "prompt_tokens": 1.0}
+
+        monkeypatch.setattr(app_mod, "collect_server_metrics", fake)
+
+    def test_live_tps_computed_without_monitor(self, env, monkeypatch):
+        self._mock_metrics(monkeypatch)
+        client = make_client(env)
+        r1 = client.get("/api/live", headers=HTMX_HEADERS)  # 首轮：建立基线
+        d1 = r1.json()
+        assert d1["metrics_reachable"] is True
+        assert d1["tps_source"] == "live"
+        assert d1["tps_now"] is None  # 首轮无前值
+        r2 = client.get("/api/live", headers=HTMX_HEADERS)
+        d2 = r2.json()
+        assert d2["tps_now"] is not None and d2["tps_now"] > 0
+        assert len(d2["series"]) >= 1
+
+    def test_unreachable_server_reports(self, env, monkeypatch):
+        import llamacpp.panel.app as app_mod
+
+        monkeypatch.setattr(app_mod, "collect_server_metrics", lambda *a, **k: None)
+        client = make_client(env)
+        data = client.get("/api/live", headers=HTMX_HEADERS).json()
+        assert data["metrics_reachable"] is False
+        assert data["tps_now"] is None
+
+    def test_counter_reset_does_not_spike(self, env, monkeypatch):
+        """模型重载导致计数器回退时不得产生负值/爆表。"""
+        import llamacpp.panel.app as app_mod
+
+        state = {"pred": 1000.0}
+        def fake(host, port, api_key=""):
+            return {"predicted_tokens": state["pred"]}
+        monkeypatch.setattr(app_mod, "collect_server_metrics", fake)
+        client = make_client(env)
+        client.get("/api/live", headers=HTMX_HEADERS)
+        client.get("/api/live", headers=HTMX_HEADERS)  # 正常递增（不变→0）
+        state["pred"] = 10.0  # 计数器回退
+        data = client.get("/api/live", headers=HTMX_HEADERS).json()
+        assert all(p[1] >= 0 for p in data["series"])

@@ -45,6 +45,7 @@
   <div class="card">
     <div class="stat-label">生成吞吐 tok/s</div>
     <div class="hero-num" id="tps-now">--</div>
+    <div class="small muted" id="tps-note">连接中…</div>
     <div class="small muted num" id="chart-peak">峰值 --</div>
   </div>
   <div class="card">
@@ -173,8 +174,23 @@ function apply(data) {
   pill.className = 'pill ' + (data.service_active ? 'ok' : 'bad');
   pill.innerHTML = `<span class="dot ${data.service_active ? 'ok' : 'bad'}"></span>${data.service_active ? '运行中' : '已停止'}`;
 
-  const tps = document.getElementById('tps-now');
-  tps.textContent = data.tps_now != null ? data.tps_now.toFixed(1) : '--';
+  const tpsEl = document.getElementById('tps-now');
+  const note = document.getElementById('tps-note');
+  if (data.tps_now != null) {
+    tpsEl.textContent = data.tps_now.toFixed(1);
+    tpsEl.style.opacity = '';
+    note.textContent = data.tps_source === 'live'
+      ? '实时采样 · 每 5 秒更新'
+      : '来自监控采样器历史';
+  } else {
+    tpsEl.textContent = '--';
+    tpsEl.style.opacity = '.35';
+    note.textContent = !data.service_active
+      ? '推理服务未运行'
+      : !data.metrics_reachable
+        ? '无法读取 /metrics（模型加载中？）'
+        : '采样中，约 5 秒后出数…';
+  }
   const peak = Math.max(0, ...data.series.map(p => p[1]));
   document.getElementById('chart-peak').textContent =
     data.series.length > 1 ? `峰值 ${peak.toFixed(1)} tok/s` : '峰值 --';

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections import deque
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -28,6 +29,7 @@ from ..config import (
 from ..models import human_size, scan_models
 from ..monitor import (
     MonitorConfig,
+    collect_server_metrics,
     connect,
     latest_tps,
     load_monitor_config,
@@ -36,6 +38,43 @@ from ..monitor import (
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 COOKIE_NAME = "panel_token"
+
+
+class LiveThroughput:
+    """面板自采实时吞吐：轮询 /metrics 计算 token 速率，不依赖监控采样器。
+
+    独立维护一个内存滚动窗口；服务不可达时保留历史但断开连续性。
+    """
+
+    def __init__(self, maxlen: int = 240) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self._hist: deque[tuple[float, float]] = deque(maxlen=maxlen)
+        self._last: tuple[float, float] | None = None  # (ts, predicted_tokens)
+        self.reachable = False
+
+    def update(self, host: str, port: str, api_key: str = "", now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        metrics = collect_server_metrics(host, port, api_key)
+        with self._lock:
+            if not metrics or "predicted_tokens" not in metrics:
+                self.reachable = False
+                self._last = None  # 断点：恢复后重新起算
+                return False
+            self.reachable = True
+            pred = float(metrics["predicted_tokens"])
+            if self._last is not None:
+                dt = now - self._last[0]
+                dp = pred - self._last[1]
+                if dt > 0 and dp >= 0:  # 计数器回退（模型重载）时跳过本轮
+                    self._hist.append((now, dp / dt))
+            self._last = (now, pred)
+            return True
+
+    def snapshot(self) -> list[tuple[float, float]]:
+        with self._lock:
+            return list(self._hist)
 
 
 def _token_for(key: str) -> str:
@@ -53,6 +92,7 @@ def create_app(
     db_path = db_path or paths.data_home() / "llamacpp" / "metrics.db"
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    live_tps = LiveThroughput()
     app = FastAPI(title="llamacpp panel", docs_url=None, redoc_url=None)
 
     def load_all() -> tuple[ServerConfig, BuildConfig]:
@@ -125,21 +165,39 @@ def create_app(
 
     @app.get("/api/live")
     async def api_live(request: Request):
-        """仪表盘轮询接口：GPU、服务状态、吞吐序列与最近告警。"""
+        """仪表盘轮询接口：GPU、服务状态、实时吞吐与最近告警。
+
+        吞吐优先用面板自采（轮询 /metrics 实时计算）；监控采样器的
+        SQLite 历史作为兑底，保证 monitor run 产生的长期曲线也能看到。
+        """
         key = load_panel_key()
         if key and request.cookies.get(COOKIE_NAME) != _token_for(key):
             raise HTTPException(status_code=401)
         cfg = load_all()
         from ..gpu import list_gpus
 
+        reachable = live_tps.update(cfg.HOST, cfg.PORT, cfg.API_KEY)
+        hist = live_tps.snapshot()
         gpus = list_gpus()
         service_active = svc.is_active(paths.service_file().name)
         conn = connect(db_path)
         tps_points = latest_tps(conn, limit=120)
         alerts = recent_alerts(conn, limit=8)
         conn.close()
+
+        if reachable:
+            series = [[int(t * 1000), round(v, 2)] for t, v in hist]
+            tps_now = hist[-1][1] if hist else None
+            source = "live"
+        else:
+            series = [[int(t * 1000), round(v, 2)] for t, v in tps_points]
+            tps_now = tps_points[-1][1] if tps_points else None
+            source = "monitor" if series else None
+
         return {
             "service_active": service_active,
+            "metrics_reachable": reachable,
+            "tps_source": source,
             "model": cfg.MODEL or None,
             "profile": _active_profile_name(),
             "gpus": [
@@ -151,8 +209,8 @@ def create_app(
                 }
                 for g in gpus
             ],
-            "tps_now": tps_points[-1][1] if tps_points else None,
-            "series": [[int(t * 1000), round(v, 2)] for t, v in tps_points],
+            "tps_now": tps_now,
+            "series": series,
             "alerts": [
                 [row[0], row[1], row[3], bool(row[4])] for row in alerts
             ],
