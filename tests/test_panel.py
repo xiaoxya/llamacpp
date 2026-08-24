@@ -30,11 +30,11 @@ def env(tmp_path):
     return tmp_path, server_env, db
 
 
-def make_client(env, panel_key: str = "") -> TestClient:
+def make_client(env, panel_key: str = "", start_sampler: bool = False) -> TestClient:
     tmp_path, _server_env, db = env
     if panel_key:
         save_monitor_config(MonitorConfig(PANEL_KEY=panel_key), tmp_path / "monitor.env")
-    app = create_app(config_dir=tmp_path, db_path=db)
+    app = create_app(config_dir=tmp_path, db_path=db, start_sampler=start_sampler)
     return TestClient(app, follow_redirects=False)
 
 
@@ -272,51 +272,104 @@ class TestApiLive:
         assert resp.status_code == 401
 
 
-class TestLiveThroughput:
-    """回归：不启动 monitor run，面板也应能实时显示 tok/s。"""
+class TestApiLiveData:
+    def test_open_access_returns_payload(self, env):
+        import json
 
-    def _mock_metrics(self, monkeypatch, counter=[0.0]):
-        import llamacpp.panel.app as app_mod
-
-        def fake(host, port, api_key=""):
-            counter[0] += 50.0
-            return {"predicted_tokens": counter[0], "prompt_tokens": 1.0}
-
-        monkeypatch.setattr(app_mod, "collect_server_metrics", fake)
-
-    def test_live_tps_computed_without_monitor(self, env, monkeypatch):
-        self._mock_metrics(monkeypatch)
         client = make_client(env)
-        r1 = client.get("/api/live", headers=HTMX_HEADERS)  # 首轮：建立基线
-        d1 = r1.json()
-        assert d1["metrics_reachable"] is True
-        assert d1["tps_source"] == "live"
-        assert d1["tps_now"] is None  # 首轮无前值
-        r2 = client.get("/api/live", headers=HTMX_HEADERS)
-        d2 = r2.json()
-        assert d2["tps_now"] is not None and d2["tps_now"] > 0
-        assert len(d2["series"]) >= 1
+        resp = client.get("/api/live", headers=HTMX_HEADERS)
+        assert resp.status_code == 200
+        data = json.loads(resp.text)
+        for key in ("service_active", "model", "gpus", "tps_now", "series",
+                    "alerts", "sampler"):
+            assert key in data
+        assert "reachable" in data["sampler"]
 
-    def test_unreachable_server_reports(self, env, monkeypatch):
-        import llamacpp.panel.app as app_mod
+    def test_auth_required_when_key_set(self, env):
+        client = make_client(env, panel_key="k1")
+        resp = client.get("/api/live", headers=HTMX_HEADERS)
+        assert resp.status_code == 401
 
-        monkeypatch.setattr(app_mod, "collect_server_metrics", lambda *a, **k: None)
+
+class TestEmbeddedSampler:
+    """回归：面板进程内置采样器自动写库，仪表盘无需手动 monitor run。"""
+
+    def test_sampler_thread_populates_db(self, env, monkeypatch):
+        import time as time_mod
+
+        import llamacpp.monitor as mon
+        from llamacpp.monitor import connect
+
+        calls = {"n": 0}
+
+        def fake_sample_once(db, cfg, alerter, prev):
+            calls["n"] += 1
+            db.execute(
+                "INSERT INTO samples (ts, gpu_index, name, mem_used_mib,"
+                " mem_total_mib, mem_pct, temperature, utilization,"
+                " predicted_tokens, prompt_tokens, predicted_tps)"
+                " VALUES (?,0,'RTX',100,200,50,60,10,?,5,?)",
+                (time_mod.time(), 100.0 + calls["n"] * 50, 5.0),
+            )
+            db.commit()
+            return 100.0 + calls["n"] * 50, []
+
+        monkeypatch.setattr(mon, "sample_once", fake_sample_once)
+
+        tmp_path, _server_env, _db = env
+        (tmp_path / "monitor.env").write_text("INTERVAL=2\n", encoding="utf-8")
+        client = make_client(env, start_sampler=True)
+
+        deadline = time_mod.time() + 5
+        while time_mod.time() < deadline and calls["n"] == 0:
+            time_mod.sleep(0.05)
+        assert calls["n"] >= 1, "采样线程应已执行"
+
+        data = client.get("/api/live", headers=HTMX_HEADERS).json()
+        assert data["sampler"]["running"] is True
+        assert data["sampler"]["interval"] == 2
+        assert data["tps_now"] is not None and data["tps_now"] > 0
+        assert len(data["series"]) >= 1
+
+        client.app.state.sampler_stop.set()
+
+    def test_sampler_stop_event_halts(self, env, monkeypatch):
+        import time as time_mod
+
+        import llamacpp.monitor as mon
+
+        calls = {"n": 0}
+
+        def fake_sample_once(db, cfg, alerter, prev):
+            calls["n"] += 1
+            return None, []
+
+        monkeypatch.setattr(mon, "sample_once", fake_sample_once)
+        client = make_client(env, start_sampler=True)
+        client.app.state.sampler_stop.set()
+        n_before = calls["n"]
+        time_mod.sleep(0.4)
+        # 停止后不再增长（可能存在一次进行中的调用）
+        assert calls["n"] - n_before <= 1
+
+    def test_seeded_db_shows_tps(self, env):
+        """无采样器时读 SQLite 兜底数据。"""
+        import time as time_mod
+
+        from llamacpp.monitor import connect
+
+        _, _server_env, db_path = env
+        conn = connect(db_path)
+        now = time_mod.time()
+        conn.execute(
+            "INSERT INTO samples (ts, gpu_index, mem_used_mib, mem_total_mib,"
+            " predicted_tps) VALUES (?,0,1,2,?)", (now, 7.5),
+        )
+        conn.commit()
+        conn.close()
         client = make_client(env)
         data = client.get("/api/live", headers=HTMX_HEADERS).json()
-        assert data["metrics_reachable"] is False
-        assert data["tps_now"] is None
+        assert data["tps_now"] == 7.5
+        assert len(data["series"]) == 1
 
-    def test_counter_reset_does_not_spike(self, env, monkeypatch):
-        """模型重载导致计数器回退时不得产生负值/爆表。"""
-        import llamacpp.panel.app as app_mod
 
-        state = {"pred": 1000.0}
-        def fake(host, port, api_key=""):
-            return {"predicted_tokens": state["pred"]}
-        monkeypatch.setattr(app_mod, "collect_server_metrics", fake)
-        client = make_client(env)
-        client.get("/api/live", headers=HTMX_HEADERS)
-        client.get("/api/live", headers=HTMX_HEADERS)  # 正常递增（不变→0）
-        state["pred"] = 10.0  # 计数器回退
-        data = client.get("/api/live", headers=HTMX_HEADERS).json()
-        assert all(p[1] >= 0 for p in data["series"])

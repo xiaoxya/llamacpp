@@ -59,7 +59,10 @@
 </div>
 
 <div class="card">
-  <h3>生成吞吐</h3>
+  <div class="row spread" style="margin-bottom:8px">
+    <h3 style="margin:0">生成吞吐</h3>
+    <span class="pill" id="sampler-chip"><span class="dot bad"></span>采样器检测中…</span>
+  </div>
   <div id="chart"></div>
 </div>
 
@@ -176,20 +179,20 @@ function apply(data) {
 
   const tpsEl = document.getElementById('tps-now');
   const note = document.getElementById('tps-note');
+  const s = data.sampler || {};
   if (data.tps_now != null) {
     tpsEl.textContent = data.tps_now.toFixed(1);
     tpsEl.style.opacity = '';
-    note.textContent = data.tps_source === 'live'
-      ? '实时采样 · 每 5 秒更新'
-      : '来自监控采样器历史';
+    note.textContent = s.interval ? `监控采样 · 每 ${s.interval}s 更新` : '监控采样';
+  } else if (!s.running) {
+    tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
+    note.textContent = '等待内置采样器启动…';
+  } else if (s.reachable === false) {
+    tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
+    note.textContent = '推理服务 /metrics 不可达（检查服务与 METRICS 配置）';
   } else {
-    tpsEl.textContent = '--';
-    tpsEl.style.opacity = '.35';
-    note.textContent = !data.service_active
-      ? '推理服务未运行'
-      : !data.metrics_reachable
-        ? '无法读取 /metrics（模型加载中？）'
-        : '采样中，约 5 秒后出数…';
+    tpsEl.textContent = '--'; tpsEl.style.opacity = '.35';
+    note.textContent = `已连接，等待首个采样（约 ${s.interval || 10}s）…`;
   }
   const peak = Math.max(0, ...data.series.map(p => p[1]));
   document.getElementById('chart-peak').textContent =
