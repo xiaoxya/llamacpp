@@ -73,7 +73,7 @@ def _unquote(value: str) -> str:
     return value
 
 
-def load_monitor_config(path: Path) -> MonitorConfig:
+def _read_monitor_values(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if path.exists():
         for raw in path.read_text(encoding="utf-8").splitlines():
@@ -83,7 +83,26 @@ def load_monitor_config(path: Path) -> MonitorConfig:
             key, _, value = line.partition("=")
             if key in MONITOR_KEYS:
                 values[key] = _unquote(value)
+    return values
+
+
+def load_monitor_config(path: Path, server_env_path: Path | None = None
+                        ) -> MonitorConfig:
+    """加载监控配置；HOST/PORT/API_KEY 未在 monitor.env 显式设置时，
+    自动继承 server.env 的推理服务地址——避免两处配置不一致导致
+    采样器探测错误端口。"""
+    values = _read_monitor_values(path)
+    explicit = set(values)
     known = {k: values[k] for k in MONITOR_KEYS if k in values}
+    if server_env_path is not None and server_env_path.exists():
+        from .config import ServerConfig, parse_env_file
+
+        svals, _ = parse_env_file(server_env_path, "server")
+        scfg = ServerConfig(**svals)
+        for key in ("HOST", "PORT", "API_KEY"):
+            if key not in explicit:
+                known[key] = getattr(scfg, key)
+    known = {k: known[k] for k in MONITOR_KEYS if k in known}
     cfg = MonitorConfig(**known)
     errors = cfg.validate()
     if errors:
@@ -358,15 +377,21 @@ def sample_once(db: sqlite3.Connection, cfg: MonitorConfig, alerter: Alerter,
     if predicted is not None and prev_predicted is not None and cfg.INTERVAL > 0:
         tps = max((predicted - prev_predicted) / cfg.INTERVAL, 0.0)
 
+    prompt_tokens = (metrics or {}).get("prompt_tokens")
     rows = []
     for s in gpu_samples:
         pct = round(s.mem_used_mib * 100 / s.mem_total_mib) if s.mem_total_mib > 0 else None
         rows.append((
             ts, s.index, s.name, s.mem_used_mib, s.mem_total_mib,
             pct, s.temperature, s.utilization,
-            predicted, (metrics or {}).get("prompt_tokens"),
+            predicted, prompt_tokens,
             tps,
         ))
+    # 服务端指标独立成行（gpu_index=-1）：即使无 GPU 数据也要保证
+    # 吞吐序列入库，否则面板永远看不到 tok/s。
+    if gpu_samples == [] and (predicted is not None or tps is not None):
+        rows.append((ts, -1, None, None, None, None, None, None,
+                     predicted, prompt_tokens, tps))
     if rows:
         db.executemany(
             "INSERT INTO samples (ts, gpu_index, name, mem_used_mib, mem_total_mib,"

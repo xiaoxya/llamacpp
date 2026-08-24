@@ -193,3 +193,72 @@ class TestQuotedValues:
         path = tmp_path / "monitor.env"
         path.write_text('PANEL_KEY=my"secret\n', encoding="utf-8")
         assert load_monitor_config(path).PANEL_KEY == 'my"secret'
+
+
+class TestConfigInheritance:
+    """回归：monitor.env 未显式设置 HOST/PORT/API_KEY 时必须继承 server.env，
+    否则采样器探测默认 8080 而推理服务跑在其他端口，导致吞吐永远为空。"""
+
+    def test_inherits_from_server_env(self, tmp_path):
+        from llamacpp.monitor import load_monitor_config
+
+        server_env = tmp_path / "server.env"
+        server_env.write_text("PORT=8123\nHOST=0.0.0.0\nAPI_KEY=sk-x\n",
+                              encoding="utf-8")
+        monitor = tmp_path / "monitor.env"
+        monitor.write_text("INTERVAL=5\n", encoding="utf-8")
+        cfg = load_monitor_config(monitor, server_env_path=server_env)
+        assert cfg.PORT == "8123"
+        assert cfg.API_KEY == "sk-x"
+
+    def test_explicit_monitor_values_win(self, tmp_path):
+        from llamacpp.monitor import load_monitor_config
+
+        server_env = tmp_path / "server.env"
+        server_env.write_text("PORT=8123\n", encoding="utf-8")
+        monitor = tmp_path / "monitor.env"
+        monitor.write_text("PORT=9999\nTEMP_MAX=90\n", encoding="utf-8")
+        cfg = load_monitor_config(monitor, server_env_path=server_env)
+        assert cfg.PORT == "9999"   # 显式设置优先
+        assert cfg.TEMP_MAX == 90
+
+    def test_missing_server_env_uses_defaults(self, tmp_path):
+        from llamacpp.monitor import load_monitor_config
+
+        cfg = load_monitor_config(tmp_path / "monitor.env",
+                                  server_env_path=tmp_path / "nope.env")
+        assert cfg.PORT == "8080"
+
+
+class TestServerMetricsWithoutGpu:
+    """回归：无 nvidia-smi 数据时，服务端吞吐也必须入库，
+    否则面板吞吐永远为空。"""
+
+    def test_tps_persisted_without_gpu_samples(self, tmp_path, monkeypatch):
+        import llamacpp.monitor as mon
+
+        monkeypatch.setattr(mon, "collect_gpu_samples", lambda: [])
+        seq = iter([{"predicted_tokens": 100.0},
+                    {"predicted_tokens": 150.0}])
+        monkeypatch.setattr(mon, "collect_server_metrics",
+                            lambda *a, **k: next(seq))
+        monkeypatch.setattr(mon, "check_health", lambda *a, **k: True)
+
+        db = connect(tmp_path / "m.db")
+        cfg = MonitorConfig(INTERVAL=10)
+        alerter = Alerter(cfg, db)
+        prev, _ = sample_once(db, cfg, alerter, None)
+        prev, _ = sample_once(db, cfg, alerter, prev)
+        points = latest_tps(db)
+        assert len(points) == 1
+        assert abs(points[0][1] - 5.0) < 1e-6   # 50 tokens / 10s
+
+    def test_no_metrics_no_rows(self, tmp_path, monkeypatch):
+        import llamacpp.monitor as mon
+
+        monkeypatch.setattr(mon, "collect_gpu_samples", lambda: [])
+        monkeypatch.setattr(mon, "collect_server_metrics", lambda *a, **k: None)
+        monkeypatch.setattr(mon, "check_health", lambda *a, **k: True)
+        db = connect(tmp_path / "m.db")
+        sample_once(db, MonitorConfig(), Alerter(MonitorConfig(), db), None)
+        assert db.execute("SELECT COUNT(*) FROM samples").fetchone()[0] == 0

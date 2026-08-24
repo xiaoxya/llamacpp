@@ -1125,7 +1125,8 @@ def monitor_run(
     from .monitor import load_monitor_config, run_loop
 
     try:
-        cfg = load_monitor_config(_monitor_env())
+        cfg = load_monitor_config(_monitor_env(),
+                                  server_env_path=paths.server_config_file())
     except ValueError as exc:
         die(str(exc))
     db_path = paths.data_home() / "llamacpp" / "metrics.db"
@@ -1165,8 +1166,12 @@ def monitor_probe() -> None:
     import urllib.error
     import urllib.request
 
-    cfg = load_monitor_config(_monitor_env())
+    scfg, _ = _load_all()
+    cfg = load_monitor_config(_monitor_env(),
+                              server_env_path=paths.server_config_file())
     print(f"[1] 目标: HOST={cfg.HOST} PORT={cfg.PORT}")
+    print(f"    来源: server.env(HOST={scfg.HOST} PORT={scfg.PORT}) "
+          f"+ monitor.env 显式项优先")
 
     print("\n[2] nvidia-smi:")
     if nvidia_smi_available():

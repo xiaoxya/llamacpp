@@ -105,7 +105,8 @@ def create_app(
     handle = SamplerHandle()  # 未启用线程时也提供统一状态对象，避免空指针
     if start_sampler:
         try:
-            sampler_cfg = load_monitor_config(monitor_env)
+            sampler_cfg = load_monitor_config(monitor_env,
+                                              server_env_path=server_env)
         except Exception:  # noqa: BLE001 — 配置缺失/损坏时用默认阈值
             sampler_cfg = MonitorConfig()
 
